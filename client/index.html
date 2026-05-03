@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI_RPG</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#101015" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <!-- Phaser 描画用コンテナ -->
+  <div id="game"></div>
+
+  <!-- 下部固定タブUI（ホーム画面で表示・切替） -->
+  <nav id="tab-bar" class="tab-bar hidden" aria-label="メインメニュー">
+    <button class="tab-button active" data-tab="adventure" type="button">冒険</button>
+    <button class="tab-button" data-tab="monsters" type="button">モンスター</button>
+    <button class="tab-button" data-tab="versus" type="button">対戦</button>
+    <button class="tab-button" data-tab="others" type="button">その他</button>
+  </nav>
+
+  <!-- ライブラリ（CDN） -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- アプリ本体 -->
+  <script src="/scenes/TitleScene.js"></script>
+  <script src="/scenes/LoginScene.js"></script>
+  <script src="/scenes/HomeScene.js"></script>
+  <script src="/main.js"></script>
+</body>
+</html>

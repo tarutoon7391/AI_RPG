@@ -1,0 +1,86 @@
+/* AI_RPG 共通スタイル
+   - PC・スマホ両対応のレスポンシブ
+   - 下部タブUIは画面サイズに合わせて伸縮
+*/
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #101015;
+  color: #f0f0f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+    "Yu Gothic", Meiryo, sans-serif;
+  overflow: hidden;
+  /* タッチ操作時のダブルタップズーム抑止 */
+  touch-action: manipulation;
+}
+
+#game {
+  position: absolute;
+  inset: 0;
+  /* タブUI分のスペースを下部に確保（ホーム画面表示時） */
+}
+
+#game canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ===== 下部固定タブ ===== */
+.tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  height: 64px;
+  background: #1c1c24;
+  border-top: 1px solid #2a2a35;
+  z-index: 10;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab-bar.hidden {
+  display: none;
+}
+
+.tab-button {
+  flex: 1 1 0;
+  background: transparent;
+  border: none;
+  color: #b0b0c0;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 8px 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tab-button:active {
+  background: #2a2a38;
+}
+
+.tab-button.active {
+  color: #ffd24a;
+  border-top: 2px solid #ffd24a;
+}
+
+/* ホーム画面表示中はキャンバスの下部にタブ分の余白を確保 */
+body.with-tabbar #game {
+  bottom: 64px;
+}
+
+/* スマホ縦：少しコンパクトに */
+@media (max-width: 480px) {
+  .tab-bar { height: 56px; }
+  body.with-tabbar #game { bottom: 56px; }
+  .tab-button { font-size: 13px; }
+}
