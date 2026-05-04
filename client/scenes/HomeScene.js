@@ -73,37 +73,90 @@ class HomeScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     logoutText.on('pointerdown', () => this.handleLogout());
 
-    // タブ別タイトル＋仮コンテンツ
+    // タブ別タイトル＋コンテンツ
     const titles = {
       adventure: '冒険',
       monsters: 'モンスター',
       versus: '対戦',
       others: 'その他',
     };
-    const messages = {
-      adventure: 'ダンジョンに挑もう！（ここに一覧が並びます）',
-      monsters: '所持モンスター・パーティ編成（実装予定）',
-      versus: '対戦・協力モードへの参加（実装予定）',
-      others: '設定・ショップ・その他メニュー（実装予定）',
-    };
 
     this.add
-      .text(width / 2, height / 2 - 30, titles[tabKey] || '', {
+      .text(width / 2, 60, titles[tabKey] || '', {
         fontFamily: 'sans-serif',
-        fontSize: '32px',
+        fontSize: '28px',
+        color: '#ffd24a',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5, 0);
+
+    if (tabKey === 'adventure') {
+      this._renderAdventureTab(width, height);
+    } else {
+      const messages = {
+        monsters: '所持モンスター・パーティ編成（実装予定）',
+        versus: '対戦・協力モードへの参加（実装予定）',
+        others: '設定・ショップ・その他メニュー（実装予定）',
+      };
+      this.add
+        .text(width / 2, height / 2, messages[tabKey] || '', {
+          fontFamily: 'sans-serif',
+          fontSize: '16px',
+          color: '#f0f0f0',
+          align: 'center',
+          wordWrap: { width: width - 40 },
+        })
+        .setOrigin(0.5);
+    }
+  }
+
+  _renderAdventureTab(width, height) {
+    // ダンジョン一覧ラベル
+    this.add
+      .text(16, 110, 'ダンジョン一覧', {
+        fontFamily: 'sans-serif',
+        fontSize: '16px',
+        color: '#b0b0c0',
+      })
+      .setOrigin(0, 0);
+
+    // 「はじまりの洞窟」ボタン
+    const btnW = Math.min(320, width - 32);
+    const btnH = 64;
+    const btnX = width / 2;
+    const btnY = 160;
+
+    const btnBg = this.add
+      .rectangle(btnX, btnY, btnW, btnH, 0x2a2050)
+      .setInteractive({ useHandCursor: true });
+
+    const btnLabel = this.add
+      .text(btnX, btnY - 10, 'はじまりの洞窟', {
+        fontFamily: 'sans-serif',
+        fontSize: '18px',
         color: '#ffd24a',
         fontStyle: 'bold',
       })
       .setOrigin(0.5);
-    this.add
-      .text(width / 2, height / 2 + 20, messages[tabKey] || '', {
+
+    const btnSub = this.add
+      .text(btnX, btnY + 14, '推奨Lv1〜  フロア数：5',  {
         fontFamily: 'sans-serif',
-        fontSize: '16px',
-        color: '#f0f0f0',
-        align: 'center',
-        wordWrap: { width: width - 40 },
+        fontSize: '12px',
+        color: '#a0a0c0',
       })
       .setOrigin(0.5);
+
+    btnBg.on('pointerover',  () => btnBg.setFillStyle(0x3a3068));
+    btnBg.on('pointerout',   () => btnBg.setFillStyle(0x2a2050));
+    btnBg.on('pointerdown',  () => {
+      this.scene.start('DungeonScene', {
+        dungeonId:   1,
+        dungeonName: 'はじまりの洞窟',
+        floor:       1,
+        maxFloor:    5,
+      });
+    });
   }
 
   async handleLogout() {

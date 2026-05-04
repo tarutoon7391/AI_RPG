@@ -1,7 +1,7 @@
 // アプリケーションのエントリポイント
 // Phaser ゲームを生成し、各シーンを登録する
 
-/* global Phaser, TitleScene, LoginScene, HomeScene */
+/* global Phaser, TitleScene, LoginScene, HomeScene, DungeonScene, BattleScene */
 
 (function () {
   // 画面サイズに合わせて自動リサイズ
@@ -21,7 +21,7 @@
     input: {
       activePointers: 3,
     },
-    scene: [TitleScene, LoginScene, HomeScene],
+    scene: [TitleScene, LoginScene, HomeScene, DungeonScene, BattleScene],
   };
 
   // グローバル状態（最低限）
