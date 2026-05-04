@@ -314,6 +314,8 @@ class DungeonScene extends Phaser.Scene {
           floor:       this.currentFloor,
           dungeonName: this.dungeonName,
           maxFloor:    this.maxFloor,
+          playerRow:   this.playerRow,   // バトル後に元の位置へ戻るために追加
+          playerCol:   this.playerCol,   // バトル後に元の位置へ戻るために追加
         },
       });
     });
