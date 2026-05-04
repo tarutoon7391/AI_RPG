@@ -3,6 +3,11 @@
 
 const { checkActionRestriction, processStatusEffectTick } = require('./statusEffects');
 
+// ===== 通常攻撃スキル定数 =====
+const NORMAL_ATTACK = {
+  id: 0, name: '通常攻撃', element: 'none', skill_type: 'physical', power: 100, mp_cost: 0,
+};
+
 // ===== 属性相性テーブル =====
 const ELEMENT_TABLE = {
   fire:  { wood: 1.5, water: 0.5 },
@@ -88,7 +93,6 @@ function calculateDamage(attacker, skill, target, buffs) {
  */
 function selectEnemyAction(monster) {
   const skills = monster.skills || [];
-  const NORMAL_ATTACK = { id: 0, name: '通常攻撃', element: 'none', skill_type: 'physical', power: 100, mp_cost: 0 };
 
   if (skills.length === 0) return NORMAL_ATTACK;
 
@@ -218,12 +222,29 @@ function processTurn(battleState, playerAction) {
       ) || aliveMonsters[0];
 
       if (playerAction.actionType === 'skill' || playerAction.actionType === 'attack') {
-        const skill = playerAction.skill || { id: 0, name: '通常攻撃', element: 'none', skill_type: 'physical', power: 100, mp_cost: 0 };
+        const skill = playerAction.skill || NORMAL_ATTACK;
 
         // 呪い状態なら通常攻撃に強制
-        const actualSkill = restriction.forceNormalAttack
-          ? { id: 0, name: '通常攻撃', element: 'none', skill_type: 'physical', power: 100, mp_cost: 0 }
-          : skill;
+        const actualSkill = restriction.forceNormalAttack ? NORMAL_ATTACK : skill;
+
+        // 混乱：自分自身へのダメージ（通常攻撃）
+        if (restriction.selfAttack) {
+          const { damage } = calculateDamage(player, NORMAL_ATTACK, player, []);
+          player.hp = Math.max(0, player.hp - damage);
+          actions.push({
+            actorType: 'player', actorId: player.id,
+            actionType: 'attack', targetId: player.id,
+            skillName: '通常攻撃（混乱）',
+            damage, heal: 0, statusEffect: null,
+            isCrit: false, isSupercrit: false, missed: false,
+            message: `${player.name} は混乱して自分を攻撃した！ ${damage} のダメージ！`,
+          });
+          if (player.hp <= 0) {
+            battleOver = true;
+            result = 'lose';
+          }
+          continue;
+        }
 
         // MP消費
         player.mp = Math.max(0, player.mp - (actualSkill.mp_cost || 0));

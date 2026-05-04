@@ -327,10 +327,15 @@ class BattleScene extends Phaser.Scene {
 
   _sendAction(actionType, skillId) {
     if (!this.waitingAction) return;
+
+    const target = this.battleState && this.battleState.monsters.find((m) => m.isAlive);
+    // 逃走・バフ系はターゲット不要、それ以外はターゲット必須
+    const needsTarget = actionType !== 'escape' && actionType !== 'skill_buff';
+    if (needsTarget && !target && actionType !== 'capture') return;
+
     this.waitingAction = false;
     this._setCommandEnabled(false);
 
-    const target = this.battleState && this.battleState.monsters.find((m) => m.isAlive);
     window.AI_RPG.socket.emit('battle:action', {
       actionType,
       skillId: skillId || null,

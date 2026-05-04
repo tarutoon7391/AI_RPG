@@ -23,6 +23,9 @@ const { processTurn, getBattleState, calculateRewards } = require('../battle/eng
 // socketId → battleState のインメモリストア
 const activeBattles = new Map();
 
+// バトル終了通知の遅延（ms）
+const BATTLE_END_DELAY = 300;
+
 /**
  * キャラクターとスキルをDBから読み込む
  */
@@ -262,7 +265,7 @@ function registerSocketHandlers(io) {
 
         setTimeout(() => {
           socket.emit('battle:end', { result, rewards, message: getBattleEndMessage(result) });
-        }, 300);
+        }, BATTLE_END_DELAY);
       }
 
       if (typeof ack === 'function') ack({ ok: true });

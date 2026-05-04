@@ -37,8 +37,13 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // GET /api/dungeons/:id/monsters - エンカウント候補モンスター（スキル付き）
-router.get('/:id/monsters', requireAuth, async (_req, res) => {
+router.get('/:id/monsters', requireAuth, async (req, res) => {
   try {
+    // dungeonId を受け取るが、現時点では全モンスターが全ダンジョンに出現する
+    const dungeonId = parseInt(req.params.id, 10);
+    if (isNaN(dungeonId)) {
+      return res.status(400).json({ error: '不正なダンジョンIDです' });
+    }
     const monstersResult = await db.query('SELECT * FROM monsters ORDER BY id');
     const monsters = monstersResult.rows;
 
