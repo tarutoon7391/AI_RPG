@@ -11,6 +11,8 @@ const cookieParser = require('cookie-parser');
 const { Server } = require('socket.io');
 
 const authRouter = require('./routes/auth');
+const characterRouter = require('./routes/character');
+const dungeonRouter = require('./routes/dungeon');
 const registerSocketHandlers = require('./socket');
 
 const app = express();
@@ -36,6 +38,8 @@ app.use(sessionMiddleware);
 
 // ====== API ルーティング ======
 app.use('/api/auth', authRouter);
+app.use('/api/character', characterRouter);
+app.use('/api/dungeons', dungeonRouter);
 
 // ヘルスチェック
 app.get('/api/health', (_req, res) => {
