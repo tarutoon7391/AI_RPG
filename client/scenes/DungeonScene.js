@@ -304,6 +304,8 @@ class DungeonScene extends Phaser.Scene {
         dungeonName: this.dungeonName,
         maxFloor:    this.maxFloor,
         isBoss,
+        playerRow:   this.playerRow,
+        playerCol:   this.playerCol,
         // 戦闘後に戻るためのデータ
         returnData: {
           dungeonId:   this.dungeonId,
