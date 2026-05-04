@@ -33,6 +33,10 @@ class DungeonScene extends Phaser.Scene {
 
     this.map = this.savedMap ? this.savedMap : this._generateMap();
     this._drawMap();
+    this._spawnPlayer();
+    this._setupInput();
+    this._setupTouch();
+    this._createHUD();
 
     this.scale.on('resize', this._onResize, this);
   }
