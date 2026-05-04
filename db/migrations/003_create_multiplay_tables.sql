@@ -6,59 +6,48 @@
 -- rooms : 部屋情報
 -- ======================
 CREATE TABLE IF NOT EXISTS rooms (
-    id              SERIAL PRIMARY KEY,
-    code            TEXT NOT NULL UNIQUE,         -- 招待用の短いコード
-    -- 'coop'(協力) / 'pvp_1v1' / 'pvp_2v2'
-    mode            TEXT NOT NULL,
-    max_players     SMALLINT NOT NULL DEFAULT 4,
-    host_user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    -- 'waiting' / 'in_battle' / 'finished'
-    status          TEXT NOT NULL DEFAULT 'waiting',
-    dungeon_id      INTEGER REFERENCES dungeons(id), -- 協力モードのみ使用
-    settings        JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    closed_at       TIMESTAMPTZ
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_type   TEXT NOT NULL CHECK (room_type IN ('coop', 'pvp')),  -- coop / pvp
+    status      TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'in_battle', 'finished')), -- waiting / in_battle / finished
+    max_players SMALLINT NOT NULL DEFAULT 4,
+    created_by  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_rooms_status ON rooms(status);
+CREATE INDEX IF NOT EXISTS idx_rooms_created_by ON rooms(created_by);
 
 -- ======================
 -- room_players : 部屋参加プレイヤー
 -- ======================
 CREATE TABLE IF NOT EXISTS room_players (
-    id              SERIAL PRIMARY KEY,
-    room_id         INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    -- pvp_2v2 用のチーム分け（'a' / 'b'）。協力時は NULL でもよい。
-    team            TEXT,
-    -- 'joined' / 'ready' / 'spectator'(全滅後の観戦) / 'left'
-    status          TEXT NOT NULL DEFAULT 'joined',
-    character_id    INTEGER REFERENCES characters(id),
-    -- 持ち込みモンスター（協力1体・対戦は仕様により）
-    monster_ids     JSONB NOT NULL DEFAULT '[]'::jsonb,
-    joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    left_at         TIMESTAMPTZ,
+    id        SERIAL PRIMARY KEY,
+    room_id   UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_ready  BOOLEAN NOT NULL DEFAULT FALSE,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (room_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_room_players_room_id ON room_players(room_id);
+CREATE INDEX IF NOT EXISTS idx_room_players_user_id ON room_players(user_id);
 
 -- ======================
 -- battle_logs : バトルログ
 -- ======================
 CREATE TABLE IF NOT EXISTS battle_logs (
-    id              BIGSERIAL PRIMARY KEY,
-    room_id         INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
-    -- 'pve' / 'coop' / 'pvp_1v1' / 'pvp_2v2'
-    battle_type     TEXT NOT NULL,
-    dungeon_id      INTEGER REFERENCES dungeons(id),
-    -- 結果: 'win' / 'lose' / 'escape' / 'draw'
-    result          TEXT,
-    started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    ended_at        TIMESTAMPTZ,
-    -- ターンごとの行動・ダメージなどを JSON 配列で保存
-    log             JSONB NOT NULL DEFAULT '[]'::jsonb,
-    -- 参加者・MVP・獲得経験値などのサマリ
-    summary         JSONB NOT NULL DEFAULT '{}'::jsonb
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id     UUID REFERENCES rooms(id) ON DELETE SET NULL,
+    turn_number INTEGER NOT NULL,
+    actor_type  TEXT NOT NULL CHECK (actor_type IN ('player', 'monster')),  -- player / monster
+    actor_id    UUID NOT NULL,
+    action_type TEXT NOT NULL CHECK (action_type IN ('attack', 'skill', 'item', 'escape', 'capture')),  -- attack / skill / item / escape / capture
+    target_id   UUID,                       -- 対象ID（nullable）
+    skill_id    INTEGER REFERENCES skills(id),
+    item_id     INTEGER REFERENCES items(id),
+    damage      INTEGER,                    -- ダメージ量（nullable）
+    heal        INTEGER,                    -- 回復量（nullable）
+    result_json JSONB NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_battle_logs_room_id ON battle_logs(room_id);
-CREATE INDEX IF NOT EXISTS idx_battle_logs_started_at ON battle_logs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_battle_logs_created_at ON battle_logs(created_at DESC);
