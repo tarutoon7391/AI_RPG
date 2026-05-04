@@ -16,6 +16,8 @@ class DungeonScene extends Phaser.Scene {
     this.maxFloor     = data.maxFloor   || 5;
     this.stepsSinceBattle = 7; // 入場直後はエンカウントなし
     this.noEncounterSteps = 7;
+    this.startRow = (data.playerRow != null) ? data.playerRow : null;
+    this.startCol = (data.playerCol != null) ? data.playerCol : null;
   }
 
   // ===== タイル種別 =====
@@ -118,9 +120,9 @@ class DungeonScene extends Phaser.Scene {
 
   _spawnPlayer() {
     const TILE = this.TILE;
-    // 開始位置は (row=1, col=2) の床
-    this.playerRow = 1;
-    this.playerCol = 2;
+    // 開始位置：復帰データがあればそれを使用、なければデフォルト (row=1, col=2)
+    this.playerRow = (this.startRow != null) ? this.startRow : 1;
+    this.playerCol = (this.startCol != null) ? this.startCol : 2;
 
     if (this.playerSprite) this.playerSprite.destroy();
     this.playerSprite = this.add.rectangle(
