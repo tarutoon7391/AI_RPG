@@ -18,6 +18,7 @@ class DungeonScene extends Phaser.Scene {
     this.noEncounterSteps = 7;
     this.startRow = (data.playerRow != null) ? data.playerRow : null;
     this.startCol = (data.playerCol != null) ? data.playerCol : null;
+    this.savedMap = data.mapData || null;
   }
 
   // ===== タイル種別 =====
@@ -30,12 +31,8 @@ class DungeonScene extends Phaser.Scene {
     this.COLS   = 15;
     this.ROWS   = 15;
 
-    this.map = this._generateMap();
+    this.map = this.savedMap ? this.savedMap : this._generateMap();
     this._drawMap();
-    this._spawnPlayer();
-    this._setupInput();
-    this._setupTouch();
-    this._createHUD();
 
     this.scale.on('resize', this._onResize, this);
   }
@@ -316,6 +313,7 @@ class DungeonScene extends Phaser.Scene {
           maxFloor:    this.maxFloor,
           playerRow:   this.playerRow,   // バトル後に元の位置へ戻るために追加
           playerCol:   this.playerCol,   // バトル後に元の位置へ戻るために追加
+          mapData:     this.map,         // バトル後にマップ構造を維持するために追加
         },
       });
     });
