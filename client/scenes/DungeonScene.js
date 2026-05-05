@@ -281,6 +281,9 @@ class DungeonScene extends Phaser.Scene {
     this.stepsSinceBattle = 0;
     this.map = this._generateMap();
     this._drawMap();
+    // 新フロアの入口（左上付近）にスポーン
+    this.startRow = 1;
+    this.startCol = 2;
     this._spawnPlayer();
     this._updateHUD();
     this._showMessage(`B${this.currentFloor}F に到着！`);
@@ -292,6 +295,9 @@ class DungeonScene extends Phaser.Scene {
     this.stepsSinceBattle = 0;
     this.map = this._generateMap();
     this._drawMap();
+    // 前フロアの階段下り出口付近（右下付近）にスポーン
+    this.startRow = this.ROWS - 2;
+    this.startCol = this.COLS - 3;
     this._spawnPlayer();
     this._updateHUD();
     this._showMessage(`B${this.currentFloor}F に戻った`);
