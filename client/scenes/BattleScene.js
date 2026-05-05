@@ -32,6 +32,7 @@ class BattleScene extends Phaser.Scene {
 
     this._buildUI();
     this._setupSocket();
+    this._setupVisibilityHandlers();
 
     // バトル開始リクエスト
     this._addLog(this.isBoss ? 'ボスが現れる予感がする...' : 'バトル開始！');
@@ -212,6 +213,41 @@ class BattleScene extends Phaser.Scene {
     s.on('battle:turn',  (data) => this._onBattleTurn(data));
     s.on('battle:end',   (data) => this._onBattleEnd(data));
     s.on('battle:error', (data) => this._addLog(`エラー: ${data.message}`));
+  }
+
+  // ===== バックグラウンド復帰時の操作不能対策 =====
+  _setupVisibilityHandlers() {
+    // タブ/ウィンドウがバックグラウンドから復帰した際に入力を再有効化
+    this._visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        // Phaserの入力を再有効化
+        if (window.AI_RPG.game && window.AI_RPG.game.input) {
+          window.AI_RPG.game.input.enabled = true;
+        }
+        // シーンの入力も再有効化
+        if (this.input) {
+          this.input.enabled = true;
+        }
+        // Socket.io再接続チェック
+        const s = window.AI_RPG.socket;
+        if (s && !s.connected) {
+          s.connect();
+        }
+      }
+    };
+
+    this._focusHandler = () => {
+      // フォーカス復帰時にも入力をリセット
+      if (window.AI_RPG.game && window.AI_RPG.game.input) {
+        window.AI_RPG.game.input.enabled = true;
+      }
+      if (this.input) {
+        this.input.enabled = true;
+      }
+    };
+
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+    window.addEventListener('focus', this._focusHandler);
   }
 
   _onBattleStart(data) {
@@ -409,6 +445,13 @@ class BattleScene extends Phaser.Scene {
       s.off('battle:turn');
       s.off('battle:end');
       s.off('battle:error');
+    }
+    // visibilitychangeとfocusイベントリスナーを削除
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+    }
+    if (this._focusHandler) {
+      window.removeEventListener('focus', this._focusHandler);
     }
   }
 }

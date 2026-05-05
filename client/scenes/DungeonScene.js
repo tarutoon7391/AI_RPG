@@ -27,15 +27,22 @@ class DungeonScene extends Phaser.Scene {
   create() {
     window.AI_RPG.showTabBar(false);
 
-    this.TILE   = 40;  // タイルサイズ（px）
-    this.COLS   = 15;
-    this.ROWS   = 15;
+    // バトルから戻ってきた際に入力をリセット
+    this.input.enabled = true;
+    this._moveBlocked = false;
+
+    // スマホ対応：画面サイズに応じたタイルサイズ調整
+    const baseSize = Math.min(window.innerWidth, window.innerHeight);
+    this.TILE = baseSize < 600 ? 32 : 40;  // 小さい画面では32px、大きい画面では40px
+    this.COLS = 15;
+    this.ROWS = 15;
 
     this.map = this.savedMap ? this.savedMap : this._generateMap();
     this._drawMap();
     this._spawnPlayer();
     this._setupInput();
     this._setupTouch();
+    this._setupVirtualDpad();  // 仮想方向パッドを追加
     this._createHUD();
 
     this.scale.on('resize', this._onResize, this);
@@ -138,6 +145,9 @@ class DungeonScene extends Phaser.Scene {
       this.playerRow * TILE + TILE / 2 - 4,
       4, 0x000000
     );
+
+    // カメラをプレイヤーに追従させる
+    this.cameras.main.startFollow(this.playerSprite, true, 0.1, 0.1);
   }
 
   _movePlayerSprite() {
@@ -146,7 +156,7 @@ class DungeonScene extends Phaser.Scene {
     const y = this.playerRow * TILE + TILE / 2;
     this.playerSprite.setPosition(x, y);
     this.playerEye.setPosition(x + 6, y - 4);
-    this._adjustCamera();
+    // カメラ追従により_adjustCameraは不要（自動追従）
   }
 
   _adjustCamera() {
@@ -196,6 +206,53 @@ class DungeonScene extends Phaser.Scene {
         this._tryMove(dy > 0 ? 1 : -1, 0);
       }
       this._touchStart = null;
+    });
+  }
+
+  // ===== 仮想方向パッド（バーチャルDpad） =====
+  _setupVirtualDpad() {
+    // スマホでのみ表示
+    const isMobile = window.innerWidth < 768;
+    if (!isMobile) return;
+
+    const { width, height } = this.scale;
+    const buttonSize = 60;
+    const padding = 10;
+    const centerX = width / 2;
+    const bottomY = height - buttonSize - padding;
+
+    // HUDコンテナに追加（カメラに固定）
+    if (!this.dpadContainer) {
+      this.dpadContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(100);
+    } else {
+      this.dpadContainer.removeAll(true);
+    }
+
+    // 4方向ボタン
+    const directions = [
+      { label: '↑', dr: -1, dc: 0, x: centerX, y: bottomY - buttonSize - padding },
+      { label: '↓', dr: 1, dc: 0, x: centerX, y: bottomY },
+      { label: '←', dr: 0, dc: -1, x: centerX - buttonSize - padding, y: bottomY - buttonSize / 2 - padding / 2 },
+      { label: '→', dr: 0, dc: 1, x: centerX + buttonSize + padding, y: bottomY - buttonSize / 2 - padding / 2 },
+    ];
+
+    directions.forEach(({ label, dr, dc, x, y }) => {
+      const btn = this.add.rectangle(x, y, buttonSize, buttonSize, 0x333344, 0.7)
+        .setInteractive({ useHandCursor: true });
+      const txt = this.add.text(x, y, label, {
+        fontFamily: 'sans-serif',
+        fontSize: '24px',
+        color: '#ffffff',
+      }).setOrigin(0.5);
+
+      btn.on('pointerdown', () => {
+        btn.setFillStyle(0x555566, 0.9);
+        this._tryMove(dr, dc);
+      });
+      btn.on('pointerup', () => btn.setFillStyle(0x333344, 0.7));
+      btn.on('pointerout', () => btn.setFillStyle(0x333344, 0.7));
+
+      this.dpadContainer.add([btn, txt]);
     });
   }
 
@@ -305,6 +362,9 @@ class DungeonScene extends Phaser.Scene {
 
   _startEncounter(isBoss) {
     this._moveBlocked = true;
+    // エンカウント時に入力を無効化（スワイプ入力残存防止）
+    this.input.enabled = false;
+
     const msg = isBoss ? 'ボスが現れた！' : 'エンカウント！';
     this._showMessage(msg, 800, () => {
       this.scene.start('BattleScene', {
@@ -354,15 +414,23 @@ class DungeonScene extends Phaser.Scene {
   }
 
   _onResize() {
+    // スマホ対応：リサイズ時にタイルサイズを再計算
+    const baseSize = Math.min(window.innerWidth, window.innerHeight);
+    this.TILE = baseSize < 600 ? 32 : 40;
+
     this._drawMap();
     this._spawnPlayer();
+    this._setupVirtualDpad();  // 仮想方向パッドを再配置
     this._createHUD();
   }
 
   shutdown() {
     this.scale.off('resize', this._onResize, this);
+    // タッチリスナーを明示的に削除
     this.input.off('pointerdown');
     this.input.off('pointerup');
+    // 入力を再有効化（シーン終了時のクリーンアップ）
+    this.input.enabled = true;
   }
 }
 
