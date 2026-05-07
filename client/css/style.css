@@ -87,6 +87,94 @@ input {
   margin-bottom: 8px;
 }
 
+#character-view {
+  margin-bottom: 10px;
+}
+
+.character-top-row {
+  display: grid;
+  gap: 6px;
+}
+
+.character-name-line,
+.character-job-line,
+.character-info-line {
+  font-size: 14px;
+}
+
+.character-job-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.small-btn {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #2a405a;
+}
+
+.character-section-title {
+  margin: 12px 0 8px;
+  font-size: 14px;
+  color: #c8daee;
+}
+
+.character-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.character-equip-list {
+  display: grid;
+  gap: 6px;
+}
+
+.equip-slot-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  gap: 8px;
+  background: #22344b;
+  font-size: 13px;
+}
+
+.equip-effect {
+  color: #9fc1e3;
+  font-size: 12px;
+  text-align: right;
+}
+
+.mini-popup {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 6px;
+  border: 1px solid #35506f;
+  border-radius: 8px;
+  background: #172434;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 4px;
+}
+
+.mini-popup button {
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  padding: 8px;
+  background: #23374f;
+}
+
+.mini-popup button.active {
+  background: #315275;
+  color: #ffd24a;
+}
+
 button {
   border: none;
   border-radius: 8px;
