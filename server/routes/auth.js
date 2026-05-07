@@ -29,41 +29,86 @@ function validateCredentials(username, password) {
   return null;
 }
 
+// キャラクター名のバリデーション
+function validateCharacterName(characterName) {
+  if (typeof characterName !== 'string') {
+    return 'キャラクター名は文字列で指定してください';
+  }
+  const trimmed = characterName.trim();
+  if (trimmed.length < 1 || trimmed.length > 32) {
+    return 'キャラクター名は1〜32文字で指定してください';
+  }
+  return null;
+}
+
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, characterName } = req.body || {};
   const validationError = validateCredentials(username, password);
   if (validationError) {
     return res.status(400).json({ error: validationError });
   }
+  const characterNameError = validateCharacterName(characterName);
+  if (characterNameError) {
+    return res.status(400).json({ error: characterNameError });
+  }
 
+  const client = await db.pool.connect();
   try {
+    await client.query('BEGIN');
     // 既存ユーザーチェック
-    const existing = await db.query(
+    const existing = await client.query(
       'SELECT id FROM users WHERE username = $1',
       [username]
     );
     if (existing.rowCount > 0) {
+      await client.query('ROLLBACK');
       return res.status(409).json({ error: 'このユーザー名は既に使用されています' });
     }
 
     // パスワードをハッシュ化（コスト10）
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const result = await db.query(
+    const result = await client.query(
       `INSERT INTO users (username, password_hash)
        VALUES ($1, $2)
        RETURNING id, username, created_at`,
       [username, passwordHash]
     );
-
     const user = result.rows[0];
+
+    await client.query(
+      `INSERT INTO characters (
+        user_id, name, current_job_id, element, hp, max_hp, mp, max_mp, attack, defense, recovery, speed, crit_rate, evasion_rate, charm
+      ) VALUES (
+        $1, $2, 1, 'none', 200, 200, 50, 50, 60, 30, 20, 40, 5.00, 5.00, 10
+      )`,
+      [user.id, characterName.trim()]
+    );
+
+    await client.query(
+      `INSERT INTO character_jobs (character_id, job_id, level, exp)
+       SELECT c.id, 1, 1, 0
+       FROM characters c
+       WHERE c.user_id = $1
+       ON CONFLICT (character_id, job_id) DO NOTHING`,
+      [user.id]
+    );
+
+    await client.query('COMMIT');
 
     return res.status(201).json({ user });
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_rollbackError) {
+      // no-op
+    }
     // eslint-disable-next-line no-console
     console.error('[auth.register] エラー:', err);
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  } finally {
+    client.release();
   }
 });
 
@@ -76,7 +121,11 @@ router.post('/login', async (req, res) => {
 
   try {
     const result = await db.query(
-      'SELECT id, username, password_hash FROM users WHERE username = $1',
+      `SELECT u.id, u.username, u.password_hash, c.current_job_id, c.name AS character_name
+       FROM users u
+       LEFT JOIN characters c ON c.user_id = u.id
+       WHERE u.username = $1
+       LIMIT 1`,
       [username]
     );
     if (result.rowCount === 0) {
@@ -92,9 +141,10 @@ router.post('/login', async (req, res) => {
 
     req.session.userId = user.id;
     req.session.username = user.username;
+    req.session.currentJobId = user.current_job_id || 1;
 
     return res.json({
-      user: { id: user.id, username: user.username },
+      user: { id: user.id, username: user.username, name: user.character_name || user.username },
     });
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -125,6 +175,7 @@ router.get('/me', requireAuth, (req, res) => {
     user: {
       id: req.session.userId,
       username: req.session.username,
+      currentJobId: req.session.currentJobId || 1,
     },
   });
 });

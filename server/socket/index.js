@@ -31,11 +31,18 @@ const BATTLE_END_DELAY = 300;
  */
 async function loadCharacter(userId) {
   const charResult = await db.query(
-    `SELECT c.* FROM characters c WHERE c.user_id = $1 LIMIT 1`,
+    `SELECT c.*, u.username
+     FROM characters c
+     INNER JOIN users u ON u.id = c.user_id
+     WHERE c.user_id = $1
+     LIMIT 1`,
     [userId]
   );
   if (charResult.rowCount === 0) return null;
   const char = charResult.rows[0];
+  if (!char.name || !char.name.trim()) {
+    char.name = char.username;
+  }
 
   let skills = [];
   if (char.current_job_id) {
@@ -266,9 +273,13 @@ function registerSocketHandlers(io) {
           });
         }
 
-        setTimeout(() => {
+        if (result === 'escape') {
           socket.emit('battle:end', { result, rewards, message: getBattleEndMessage(result) });
-        }, BATTLE_END_DELAY);
+        } else {
+          setTimeout(() => {
+            socket.emit('battle:end', { result, rewards, message: getBattleEndMessage(result) });
+          }, BATTLE_END_DELAY);
+        }
       }
 
       if (typeof ack === 'function') ack({ ok: true });
