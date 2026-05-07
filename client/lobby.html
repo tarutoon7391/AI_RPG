@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI_RPG ロビー</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#0f1923" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>AI_RPG</h1>
+      <p id="status-text">読み込み中...</p>
+      <button id="logout-btn" type="button" class="secondary">ログアウト</button>
+    </header>
+
+    <main id="main-content">
+      <section id="home-view">
+        <div id="dungeon-list" class="panel hidden">
+          <h2>ダンジョン一覧</h2>
+          <button id="main-dungeon-category-btn" class="dungeon-btn" type="button">メインダンジョン</button>
+          <button class="dungeon-btn ghost not-implemented" type="button" data-kind="エクストラダンジョン">エクストラダンジョン</button>
+          <button class="dungeon-btn ghost not-implemented" type="button" data-kind="イベントダンジョン">イベントダンジョン</button>
+          <button class="dungeon-btn ghost not-implemented" type="button" data-kind="デイリーダンジョン">デイリーダンジョン</button>
+        </div>
+        <div id="main-dungeon-list" class="panel hidden">
+          <h2>メインダンジョン一覧</h2>
+          <button id="main-dungeon-btn" class="dungeon-btn" type="button">
+            はじまりの草原（推奨Lv1）
+          </button>
+          <button id="back-to-dungeon-list-btn" class="dungeon-btn ghost" type="button">戻る</button>
+        </div>
+        <div id="placeholder-view" class="panel">
+          <h2 id="placeholder-title">冒険</h2>
+          <p id="placeholder-message">冒険タブを押すとダンジョン一覧を表示します。</p>
+        </div>
+      </section>
+
+      <section id="battle-view" class="hidden">
+        <div class="battle-layout">
+          <div class="enemy-area">
+            <div id="enemy-name" class="enemy-name">---</div>
+            <div class="enemy-visual" id="enemy-visual">ENEMY</div>
+            <div class="bar-wrap">
+              <div class="bar-label" id="enemy-hp-text">HP ---/---</div>
+              <div class="bar-bg"><div id="enemy-hp-bar" class="bar hp"></div></div>
+            </div>
+          </div>
+
+          <div class="player-area">
+            <div id="player-name">---</div>
+            <div class="bar-wrap">
+              <div class="bar-label" id="player-hp-text">HP ---/---</div>
+              <div class="bar-bg"><div id="player-hp-bar" class="bar hp"></div></div>
+            </div>
+            <div class="bar-wrap">
+              <div class="bar-label" id="player-mp-text">MP ---/---</div>
+              <div class="bar-bg"><div id="player-mp-bar" class="bar mp"></div></div>
+            </div>
+          </div>
+
+          <div class="command-area">
+            <button class="cmd-btn" data-command="attack" type="button">⚔️ 攻撃</button>
+            <button class="cmd-btn" data-command="skill" type="button">✨ スキル</button>
+            <button class="cmd-btn" data-command="capture" type="button">🤝 仲間に</button>
+            <button class="cmd-btn" data-command="escape" type="button">🏃 逃げる</button>
+          </div>
+        </div>
+
+        <div class="battle-log" id="battle-log"></div>
+        <button id="back-to-home-btn" class="back-home-btn" type="button">冒険へ戻る</button>
+      </section>
+    </main>
+
+    <nav id="tab-bar" class="tab-bar" aria-label="メインメニュー">
+      <button class="tab-button active" data-tab="adventure" type="button">冒険</button>
+      <button class="tab-button" data-tab="monsters" type="button">モンスター</button>
+      <button class="tab-button" data-tab="versus" type="button">対戦</button>
+      <button class="tab-button" data-tab="others" type="button">その他</button>
+    </nav>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <p id="modal-message">未実装です</p>
+      <button id="modal-close" type="button">閉じる</button>
+    </div>
+  </div>
+
+  <div id="skill-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <p>スキルを選択してください</p>
+      <div id="skill-list" class="skill-list"></div>
+      <button id="skill-cancel" type="button" class="secondary">キャンセル</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/lobby.js"></script>
+</body>
+</html>
