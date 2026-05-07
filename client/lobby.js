@@ -850,6 +850,7 @@
     }
     const aliveTarget = (state.battleState?.monsters || []).find((m) => m.isAlive);
     if (!aliveTarget) {
+      addBattleLog('対象となるモンスターがいません');
       return;
     }
     els.skillList.textContent = '';
