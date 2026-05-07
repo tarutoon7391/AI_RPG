@@ -5,7 +5,7 @@
     version: 2,
     ui: {
       activeTab: 'adventure',
-      lastScreen: 'dungeonCategoryList',
+      lastScreen: 'dungeonList',
     },
     progress: {
       lastDungeonId: 1,
@@ -175,7 +175,7 @@
       els.dungeonList.classList.remove('hidden');
       els.mainDungeonList.classList.add('hidden');
       els.placeholderView.classList.add('hidden');
-      state.save.ui.lastScreen = 'dungeonCategoryList';
+      state.save.ui.lastScreen = 'dungeonList';
     } else {
       els.dungeonList.classList.add('hidden');
       els.mainDungeonList.classList.add('hidden');
@@ -197,7 +197,7 @@
     els.mainDungeonList.classList.add('hidden');
     els.dungeonList.classList.remove('hidden');
     els.placeholderView.classList.add('hidden');
-    state.save.ui.lastScreen = 'dungeonCategoryList';
+    state.save.ui.lastScreen = 'dungeonList';
     persistSave();
   }
 
