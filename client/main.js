@@ -41,7 +41,9 @@
   window.AI_RPG.game = game;
 
   // キャンバスのCSSサイズと実解像度をDPRに合わせて同期
+  let canvasSyncScheduled = false;
   const syncCanvasResolution = function () {
+    canvasSyncScheduled = false;
     const canvas = game.canvas;
     if (!canvas) return;
 
@@ -65,13 +67,15 @@
     if (canvas.height !== realHeight) canvas.height = realHeight;
   };
 
-  if (game.isBooted) {
-    syncCanvasResolution();
-  } else {
-    game.events.once('ready', syncCanvasResolution);
-  }
-  window.addEventListener('resize', syncCanvasResolution);
-  window.addEventListener('orientationchange', syncCanvasResolution);
+  const scheduleCanvasSync = function () {
+    if (canvasSyncScheduled) return;
+    canvasSyncScheduled = true;
+    window.requestAnimationFrame(syncCanvasResolution);
+  };
+
+  scheduleCanvasSync();
+  window.addEventListener('resize', scheduleCanvasSync);
+  window.addEventListener('orientationchange', scheduleCanvasSync);
 
   // タブUI制御
   const tabBar = document.getElementById('tab-bar');
@@ -99,6 +103,6 @@
       tabBar.classList.add('hidden');
       document.body.classList.remove('with-tabbar');
     }
-    syncCanvasResolution();
+    scheduleCanvasSync();
   };
 })();
