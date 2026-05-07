@@ -29,6 +29,54 @@
         <div class="home-actions">
           <button id="logout-btn" type="button" class="secondary">ログアウト</button>
         </div>
+        <div id="character-view" class="panel hidden">
+          <div class="character-top-row">
+            <div class="character-name-line">名前：<span id="char-name">---</span></div>
+            <div class="character-job-line">
+              職業：<span id="char-job">---</span>
+              <button id="job-change-btn" type="button" class="small-btn">転職</button>
+            </div>
+          </div>
+          <div class="character-info-line">レベル：<span id="char-level">1</span>（次のレベルまで：<span id="char-next-exp">0</span>EXP）</div>
+          <div class="character-info-line">所持金：<span id="char-gold">0</span>G</div>
+
+          <h3 class="character-section-title">基本ステータス</h3>
+          <div class="character-stats-grid">
+            <div>HP: <span id="char-hp">0</span>/<span id="char-max-hp">0</span></div>
+            <div>MP: <span id="char-mp">0</span>/<span id="char-max-mp">0</span></div>
+            <div>攻撃力: <span id="char-atk">0</span></div>
+            <div>防御力: <span id="char-def">0</span></div>
+            <div>回復力: <span id="char-rec">0</span></div>
+            <div>素早さ: <span id="char-spd">0</span></div>
+            <div>会心率: <span id="char-crit">0</span>%</div>
+            <div>回避率: <span id="char-eva">0</span>%</div>
+            <div>魅力度: <span id="char-charm">0</span></div>
+          </div>
+
+          <h3 class="character-section-title">装備</h3>
+          <div class="character-equip-list">
+            <button type="button" class="equip-slot-btn" data-slot="head">
+              <span>頭：<span id="equip-head-name">未装備</span></span>
+              <span id="equip-head-effect" class="equip-effect">-</span>
+            </button>
+            <button type="button" class="equip-slot-btn" data-slot="body">
+              <span>体：<span id="equip-body-name">未装備</span></span>
+              <span id="equip-body-effect" class="equip-effect">-</span>
+            </button>
+            <button type="button" class="equip-slot-btn" data-slot="legs">
+              <span>足：<span id="equip-legs-name">未装備</span></span>
+              <span id="equip-legs-effect" class="equip-effect">-</span>
+            </button>
+            <button type="button" class="equip-slot-btn" data-slot="shoes">
+              <span>靴：<span id="equip-shoes-name">未装備</span></span>
+              <span id="equip-shoes-effect" class="equip-effect">-</span>
+            </button>
+            <button type="button" class="equip-slot-btn" data-slot="accessory">
+              <span>アクセサリー：<span id="equip-accessory-name">未装備</span></span>
+              <span id="equip-accessory-effect" class="equip-effect">-</span>
+            </button>
+          </div>
+        </div>
         <div id="dungeon-list" class="panel hidden">
           <h2>ダンジョン一覧</h2>
           <button id="main-dungeon-category-btn" class="dungeon-btn" type="button">メインダンジョン</button>
@@ -87,7 +135,7 @@
 
     <nav id="tab-bar" class="tab-bar hidden" aria-label="メインメニュー">
       <button class="tab-button active" data-tab="adventure" type="button">冒険</button>
-      <button class="tab-button" data-tab="monsters" type="button">モンスター</button>
+      <button class="tab-button" data-tab="monsters" type="button">キャラ・モンスター</button>
       <button class="tab-button" data-tab="versus" type="button">対戦</button>
       <button class="tab-button" data-tab="others" type="button">その他</button>
     </nav>
@@ -107,6 +155,8 @@
       <button id="skill-cancel" type="button" class="secondary">キャンセル</button>
     </div>
   </div>
+
+  <div id="mini-popup" class="mini-popup hidden" role="menu" aria-hidden="true"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/main.js"></script>
