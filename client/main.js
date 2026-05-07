@@ -34,7 +34,7 @@
     authPass: document.getElementById('auth-password'),
     authError: document.getElementById('auth-error'),
     loginBtn: document.getElementById('login-btn'),
-    registerBtn: document.getElementById('register-btn'),
+    logoutBtn: document.getElementById('logout-btn'),
     homeView: document.getElementById('home-view'),
     dungeonList: document.getElementById('dungeon-list'),
     placeholderView: document.getElementById('placeholder-view'),
@@ -219,6 +219,12 @@
     });
   }
 
+  function disconnectSocket() {
+    if (!state.socket) return;
+    state.socket.disconnect();
+    state.socket = null;
+  }
+
   function addBattleLog(message) {
     const line = document.createElement('div');
     line.textContent = message;
@@ -330,7 +336,40 @@
     persistSave();
   }
 
-  async function auth(endpoint) {
+  function showLoginView() {
+    state.user = null;
+    state.battleState = null;
+    state.waitingAction = false;
+    disconnectSocket();
+    setBattleVisible(false);
+    setCommandEnabled(false);
+    els.authPanel.classList.remove('hidden');
+    els.homeView.classList.add('hidden');
+    els.tabBar.classList.add('hidden');
+    els.statusText.textContent = '未ログイン';
+  }
+
+  function showLobbyView(user) {
+    state.user = user;
+    els.statusText.textContent = `${state.user.username} でログイン中`;
+    els.authPanel.classList.add('hidden');
+    els.homeView.classList.remove('hidden');
+    els.tabBar.classList.remove('hidden');
+    connectSocket();
+    setActiveTab(state.save.ui.activeTab);
+  }
+
+  async function fetchCurrentUser() {
+    const res = await fetch('/api/auth/me', {
+      method: 'GET',
+      credentials: 'same-origin',
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    return data.user || null;
+  }
+
+  async function auth() {
     els.authError.textContent = '';
     const username = els.authUser.value.trim();
     const password = els.authPass.value;
@@ -340,7 +379,7 @@
     }
 
     try {
-      const res = await fetch(`/api/auth/${endpoint}`, {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -351,21 +390,33 @@
         els.authError.textContent = data.error || '通信エラーが発生しました';
         return;
       }
-      state.user = data.user;
-      els.statusText.textContent = `${state.user.username} でログイン中`;
-      els.authPanel.classList.add('hidden');
-      els.homeView.classList.remove('hidden');
-      els.tabBar.classList.remove('hidden');
-      connectSocket();
-      setActiveTab(state.save.ui.activeTab);
+      showLobbyView(data.user);
     } catch (_e) {
       els.authError.textContent = 'ネットワークエラーが発生しました';
     }
   }
 
+  async function logout() {
+    els.authError.textContent = '';
+    try {
+      const res = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showModal(data.error || 'ログアウトに失敗しました');
+        return;
+      }
+      showLoginView();
+    } catch (_e) {
+      showModal('ネットワークエラーが発生しました');
+    }
+  }
+
   function bindEvents() {
-    els.loginBtn.addEventListener('click', () => auth('login'));
-    els.registerBtn.addEventListener('click', () => auth('register'));
+    els.loginBtn.addEventListener('click', auth);
+    els.logoutBtn.addEventListener('click', logout);
 
     els.mainDungeonBtn.addEventListener('click', requestBattleStart);
     els.notImplementedButtons.forEach((btn) => {
@@ -417,11 +468,21 @@
     });
   }
 
-  function init() {
+  async function init() {
     state.save = loadSaveData();
     bindEvents();
-    setBattleVisible(false);
-    setCommandEnabled(false);
+    els.statusText.textContent = '認証確認中...';
+
+    try {
+      const user = await fetchCurrentUser();
+      if (user) {
+        showLobbyView(user);
+        return;
+      }
+      showLoginView();
+    } catch (_e) {
+      showLoginView();
+    }
   }
 
   init();
