@@ -37,11 +37,14 @@
     registerBtn: document.getElementById('register-btn'),
     homeView: document.getElementById('home-view'),
     dungeonList: document.getElementById('dungeon-list'),
+    mainDungeonList: document.getElementById('main-dungeon-list'),
     placeholderView: document.getElementById('placeholder-view'),
     placeholderTitle: document.getElementById('placeholder-title'),
     placeholderMessage: document.getElementById('placeholder-message'),
     battleView: document.getElementById('battle-view'),
+    mainDungeonCategoryBtn: document.getElementById('main-dungeon-category-btn'),
     mainDungeonBtn: document.getElementById('main-dungeon-btn'),
+    backToDungeonListBtn: document.getElementById('back-to-dungeon-list-btn'),
     tabBar: document.getElementById('tab-bar'),
     tabs: document.querySelectorAll('.tab-button'),
     notImplementedButtons: document.querySelectorAll('.not-implemented'),
@@ -170,13 +173,31 @@
 
     if (tab === 'adventure') {
       els.dungeonList.classList.remove('hidden');
+      els.mainDungeonList.classList.add('hidden');
       els.placeholderView.classList.add('hidden');
       state.save.ui.lastScreen = 'dungeonList';
     } else {
       els.dungeonList.classList.add('hidden');
+      els.mainDungeonList.classList.add('hidden');
       els.placeholderView.classList.remove('hidden');
       state.save.ui.lastScreen = 'placeholder';
     }
+    persistSave();
+  }
+
+  function showMainDungeonList() {
+    els.dungeonList.classList.add('hidden');
+    els.mainDungeonList.classList.remove('hidden');
+    els.placeholderView.classList.add('hidden');
+    state.save.ui.lastScreen = 'mainDungeonList';
+    persistSave();
+  }
+
+  function showDungeonCategoryList() {
+    els.mainDungeonList.classList.add('hidden');
+    els.dungeonList.classList.remove('hidden');
+    els.placeholderView.classList.add('hidden');
+    state.save.ui.lastScreen = 'dungeonList';
     persistSave();
   }
 
@@ -189,6 +210,7 @@
       state.playerSkills = data.playerSkills || [];
       state.waitingAction = true;
       updateBattleState();
+      setCommandEnabled(true);
       addBattleLog(data.message || 'バトル開始');
       setBattleVisible(true);
     });
@@ -367,7 +389,9 @@
     els.loginBtn.addEventListener('click', () => auth('login'));
     els.registerBtn.addEventListener('click', () => auth('register'));
 
+    els.mainDungeonCategoryBtn.addEventListener('click', showMainDungeonList);
     els.mainDungeonBtn.addEventListener('click', requestBattleStart);
+    els.backToDungeonListBtn.addEventListener('click', showDungeonCategoryList);
     els.notImplementedButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         showModal('未実装です');
