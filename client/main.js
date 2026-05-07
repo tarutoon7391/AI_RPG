@@ -4,11 +4,14 @@
 /* global Phaser, TitleScene, LoginScene, HomeScene, DungeonScene, BattleScene */
 
 (function () {
+  const getDevicePixelRatio = () => window.devicePixelRatio || 1;
+
   // 画面サイズに合わせて自動リサイズ
   const config = {
     type: Phaser.AUTO,
     parent: 'game',
     backgroundColor: '#101015',
+    resolution: getDevicePixelRatio(),
     scale: {
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -37,6 +40,47 @@
   const game = new Phaser.Game(config);
   window.AI_RPG.game = game;
 
+  // キャンバスのCSSサイズと実解像度をDPRに合わせて同期
+  let canvasSyncScheduled = false;
+  const syncCanvasResolution = () => {
+    canvasSyncScheduled = false;
+    const canvas = game.canvas;
+    if (!canvas) return;
+
+    const parent = canvas.parentElement || document.getElementById('game');
+    if (!parent) return;
+
+    const rect = parent.getBoundingClientRect();
+    const cssWidth = Math.max(1, Math.round(rect.width));
+    const cssHeight = Math.max(1, Math.round(rect.height));
+    const dpr = getDevicePixelRatio();
+    const realWidth = Math.round(cssWidth * dpr);
+    const realHeight = Math.round(cssHeight * dpr);
+    const cssWidthPx = `${cssWidth}px`;
+    const cssHeightPx = `${cssHeight}px`;
+
+    if (canvas.style.width !== cssWidthPx || canvas.style.height !== cssHeightPx) {
+      canvas.style.width = cssWidthPx;
+      canvas.style.height = cssHeightPx;
+    }
+    if (canvas.width !== realWidth) {
+      canvas.width = realWidth;
+    }
+    if (canvas.height !== realHeight) {
+      canvas.height = realHeight;
+    }
+  };
+
+  const scheduleCanvasSync = () => {
+    if (canvasSyncScheduled) return;
+    canvasSyncScheduled = true;
+    window.requestAnimationFrame(syncCanvasResolution);
+  };
+
+  scheduleCanvasSync();
+  window.addEventListener('resize', scheduleCanvasSync);
+  window.addEventListener('orientationchange', scheduleCanvasSync);
+
   // タブUI制御
   const tabBar = document.getElementById('tab-bar');
   document.querySelectorAll('.tab-button').forEach((btn) => {
@@ -63,5 +107,6 @@
       tabBar.classList.add('hidden');
       document.body.classList.remove('with-tabbar');
     }
+    scheduleCanvasSync();
   };
 })();
