@@ -503,10 +503,7 @@
   }
 
   function changeJob(jobName) {
-    state.save.character.selectedJobName = jobName;
-    persistSave();
-    renderCharacterView();
-    closeMiniPopup();
+    return changeJobOnServer(jobName);
   }
 
   function openJobPopup(anchorEl) {
@@ -639,6 +636,7 @@
   function resetSessionState() {
     state.user = null;
     state.battleState = null;
+    state.playerSkills = [];
     state.waitingAction = false;
     state.characterData = null;
     closeMiniPopup();
@@ -694,6 +692,31 @@
     return { playerAction, enemyAction, extras };
   }
 
+  function cloneBattleState(battle) {
+    if (!battle) return null;
+    if (typeof structuredClone === 'function') {
+      return structuredClone(battle);
+    }
+    return JSON.parse(JSON.stringify(battle));
+  }
+
+  function applyActionToBattleState(battle, action) {
+    if (!battle || !action || action.missed || !action.damage || action.damage <= 0) return;
+    if (action.targetId == null) return;
+
+    if (String(action.targetId) === String(battle.player?.id)) {
+      battle.player.hp = Math.max(0, (battle.player.hp || 0) - action.damage);
+      return;
+    }
+
+    const targetMonster = (battle.monsters || []).find(
+      (m) => m && String(m.id) === String(action.targetId)
+    );
+    if (!targetMonster) return;
+    targetMonster.hp = Math.max(0, (targetMonster.hp || 0) - action.damage);
+    targetMonster.isAlive = targetMonster.hp > 0;
+  }
+
   function isBattleContinuable() {
     const battle = state.battleState;
     if (!battle || !battle.player || state.pendingBattleEnd) return false;
@@ -704,15 +727,27 @@
 
   async function processBattleTurn(data) {
     state.pendingBattleEnd = false;
-    state.battleState = data.state || null;
+    const nextState = data.state || null;
+    const visualState = cloneBattleState(state.battleState) || cloneBattleState(nextState);
+    state.battleState = visualState;
     updateBattleState();
     state.waitingAction = false;
     setCommandEnabled(false);
 
     const { playerAction, enemyAction, extras } = splitTurnActions(data.actions);
 
+    if (playerAction?.actionType === 'escape' && playerAction.message === '逃げ切った！') {
+      addBattleLog(playerAction.message);
+      state.battleState = nextState;
+      updateBattleState();
+      return;
+    }
+
     if (playerAction?.message) addBattleLog(playerAction.message);
     await wait(1000);
+    applyActionToBattleState(visualState, playerAction);
+    state.battleState = visualState;
+    updateBattleState();
     await playDamageEffect(playerAction);
     await wait(1000);
 
@@ -726,13 +761,20 @@
     if (enemyAction && canContinue) {
       if (enemyAction.message) addBattleLog(enemyAction.message);
       await wait(1000);
+      applyActionToBattleState(visualState, enemyAction);
+      state.battleState = visualState;
+      updateBattleState();
       await playDamageEffect(enemyAction);
       await wait(1000);
     }
 
     extras.forEach((x) => {
       if (x.message) addBattleLog(x.message);
+      applyActionToBattleState(visualState, x);
     });
+
+    state.battleState = nextState;
+    updateBattleState();
 
     if (!isBattleContinuable()) return;
     addBattleLog('あなたのターン');
@@ -863,7 +905,8 @@
 
   async function showLobbyView(user) {
     state.user = user;
-    els.statusText.textContent = `ログイン状態: ${state.user.username} でログイン中`;
+    const displayName = state.user.name || state.user.username;
+    els.statusText.textContent = `ログイン状態: ${displayName} でログイン中`;
     els.authPanel.classList.add('hidden');
     els.homeView.classList.remove('hidden');
     els.tabBar.classList.remove('hidden');
@@ -894,7 +937,11 @@
     if (!res.ok) return null;
     try {
       const data = await res.json();
-      return data && data.character ? data.character : null;
+      if (!data || !data.character) return null;
+      return {
+        character: data.character,
+        skills: Array.isArray(data.skills) ? data.skills : [],
+      };
     } catch (_e) {
       return null;
     }
@@ -902,9 +949,11 @@
 
   async function loadCharacterProfile() {
     try {
-      const character = await fetchCharacterProfile();
-      if (!character) return;
+      const profile = await fetchCharacterProfile();
+      if (!profile) return;
+      const character = profile.character;
       state.characterData = character;
+      state.playerSkills = profile.skills;
       if (character.job_name && typeof character.job_name === 'string') {
         const incomingJobName = character.job_name.trim();
         if (state.save.character.beginnerJobs.includes(incomingJobName)) {
@@ -912,9 +961,37 @@
         }
         persistSave();
       }
+      const displayName = character.name || state.user?.name || state.user?.username;
+      if (displayName) {
+        els.statusText.textContent = `ログイン状態: ${displayName} でログイン中`;
+      }
       renderCharacterView();
     } catch (_e) {
       state.characterData = null;
+    }
+  }
+
+  async function changeJobOnServer(jobName) {
+    try {
+      const res = await fetch('/api/character/job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ jobName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showModal(data.error || '転職に失敗しました');
+        return;
+      }
+      state.save.character.selectedJobName = data.currentJobName || jobName;
+      state.playerSkills = Array.isArray(data.skills) ? data.skills : [];
+      persistSave();
+      await loadCharacterProfile();
+      renderCharacterView();
+      closeMiniPopup();
+    } catch (_e) {
+      showModal('転職に失敗しました');
     }
   }
 
