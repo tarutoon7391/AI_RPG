@@ -158,19 +158,7 @@
 
   <div id="mini-popup" class="mini-popup hidden" role="menu" aria-hidden="true"></div>
 
-  <script>
-    (async function () {
-      try {
-        const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
-        if (!res.ok) {
-          location.replace('/login.html');
-        }
-      } catch (_e) {
-        location.replace('/login.html');
-      }
-    })();
-  </script>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/main.js"></script>
+  <script src="/lobby.js"></script>
 </body>
 </html>
