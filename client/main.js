@@ -42,7 +42,7 @@
 
   // キャンバスのCSSサイズと実解像度をDPRに合わせて同期
   let canvasSyncScheduled = false;
-  const syncCanvasResolution = function () {
+  const syncCanvasResolution = () => {
     canvasSyncScheduled = false;
     const canvas = game.canvas;
     if (!canvas) return;
@@ -63,11 +63,15 @@
       canvas.style.width = cssWidthPx;
       canvas.style.height = cssHeightPx;
     }
-    if (canvas.width !== realWidth) canvas.width = realWidth;
-    if (canvas.height !== realHeight) canvas.height = realHeight;
+    if (canvas.width !== realWidth) {
+      canvas.width = realWidth;
+    }
+    if (canvas.height !== realHeight) {
+      canvas.height = realHeight;
+    }
   };
 
-  const scheduleCanvasSync = function () {
+  const scheduleCanvasSync = () => {
     if (canvasSyncScheduled) return;
     canvasSyncScheduled = true;
     window.requestAnimationFrame(syncCanvasResolution);
