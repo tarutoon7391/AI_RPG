@@ -4,7 +4,6 @@
     authPass: document.getElementById('auth-password'),
     authError: document.getElementById('auth-error'),
     loginBtn: document.getElementById('login-btn'),
-    registerBtn: document.getElementById('register-btn'),
   };
 
   async function checkSessionAndRedirect() {
@@ -21,7 +20,7 @@
     }
   }
 
-  async function auth(endpoint) {
+  async function login() {
     els.authError.textContent = '';
     const username = els.authUser.value.trim();
     const password = els.authPass.value;
@@ -31,7 +30,7 @@
     }
 
     try {
-      const res = await fetch(`/api/auth/${endpoint}`, {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -49,8 +48,7 @@
   }
 
   function bindEvents() {
-    els.loginBtn.addEventListener('click', () => auth('login'));
-    els.registerBtn.addEventListener('click', () => auth('register'));
+    els.loginBtn.addEventListener('click', login);
   }
 
   async function init() {
