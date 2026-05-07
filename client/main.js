@@ -25,9 +25,12 @@
     playerSkills: [],
     waitingAction: false,
     save: null,
+    turnSequence: Promise.resolve(),
+    pendingBattleEnd: false,
   };
 
   const els = {
+    app: document.getElementById('app'),
     statusText: document.getElementById('status-text'),
     authPanel: document.getElementById('auth-panel'),
     authUser: document.getElementById('auth-username'),
@@ -55,6 +58,7 @@
     skillList: document.getElementById('skill-list'),
     skillCancel: document.getElementById('skill-cancel'),
     enemyName: document.getElementById('enemy-name'),
+    enemyVisual: document.getElementById('enemy-visual'),
     enemyHpText: document.getElementById('enemy-hp-text'),
     enemyHpBar: document.getElementById('enemy-hp-bar'),
     playerName: document.getElementById('player-name'),
@@ -209,6 +213,8 @@
       state.battleState = data.state || null;
       state.playerSkills = data.playerSkills || [];
       state.waitingAction = true;
+      state.pendingBattleEnd = false;
+      state.turnSequence = Promise.resolve();
       updateBattleState();
       setCommandEnabled(true);
       addBattleLog(data.message || 'バトル開始');
@@ -216,22 +222,11 @@
     });
 
     state.socket.on('battle:turn', (data) => {
-      state.battleState = data.state || null;
-      const messages = (data.actions || []).map((x) => x.message).filter(Boolean);
-      messages.forEach(addBattleLog);
-      state.waitingAction = true;
-      updateBattleState();
-      setCommandEnabled(true);
+      state.turnSequence = state.turnSequence.then(() => processBattleTurn(data));
     });
 
     state.socket.on('battle:end', (data) => {
-      state.waitingAction = false;
-      setCommandEnabled(false);
-      addBattleLog(data.message || '戦闘終了');
-      if (data.result === 'win' && data.rewards) {
-        addBattleLog(`経験値 +${data.rewards.exp} / お金 +${data.rewards.money}`);
-      }
-      addBattleLog('「冒険へ戻る」を押すとダンジョン一覧に戻ります。');
+      state.turnSequence = state.turnSequence.then(() => processBattleEnd(data));
     });
 
     state.socket.on('battle:error', (data) => {
@@ -248,6 +243,99 @@
     if (state.save.battle.autoScrollLog) {
       els.battleLog.scrollTop = els.battleLog.scrollHeight;
     }
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function playShake(targets, className, duration = 300) {
+    const list = targets.filter(Boolean);
+    if (!list.length) return;
+    list.forEach((el) => {
+      el.classList.remove(className);
+      void el.offsetWidth;
+      el.classList.add(className);
+    });
+    await wait(duration);
+    list.forEach((el) => el.classList.remove(className));
+  }
+
+  async function playDamageEffect(action) {
+    if (!action || action.missed || !action.damage || action.damage <= 0) return;
+    if (action.actorType === 'player') {
+      await playShake([els.enemyVisual, els.enemyHpText], 'shake-target');
+      return;
+    }
+    if (action.actorType === 'monster') {
+      await Promise.all([
+        playShake([els.playerHpText], 'shake-target'),
+        playShake([els.app], 'shake-screen'),
+      ]);
+    }
+  }
+
+  function splitTurnActions(actions) {
+    const queue = Array.isArray(actions) ? actions.filter(Boolean) : [];
+    const playerAction = queue.find((x) => x.actorType === 'player') || null;
+    const enemyAction = queue.find((x) => x.actorType === 'monster') || null;
+    const extras = queue.filter((x) => x !== playerAction && x !== enemyAction);
+    return { playerAction, enemyAction, extras };
+  }
+
+  function isBattleContinuable() {
+    const battle = state.battleState;
+    if (!battle || state.pendingBattleEnd) return false;
+    const playerAlive = (battle.player?.hp || 0) > 0;
+    const hasAliveEnemy = (battle.monsters || []).some((m) => m && m.isAlive);
+    return playerAlive && hasAliveEnemy;
+  }
+
+  async function processBattleTurn(data) {
+    state.pendingBattleEnd = false;
+    state.battleState = data.state || null;
+    updateBattleState();
+    state.waitingAction = false;
+    setCommandEnabled(false);
+
+    const { playerAction, enemyAction, extras } = splitTurnActions(data.actions);
+
+    if (playerAction) addBattleLog(playerAction.message || 'プレイヤーが行動した。');
+    await wait(1000);
+    await playDamageEffect(playerAction);
+    await wait(1000);
+
+    if (isBattleContinuable()) {
+      addBattleLog('敵のターン');
+      await wait(1000);
+    }
+
+    if (enemyAction && isBattleContinuable()) {
+      addBattleLog(enemyAction.message || '敵が行動した。');
+      await wait(1000);
+      await playDamageEffect(enemyAction);
+      await wait(1000);
+    }
+
+    extras.forEach((x) => {
+      if (x.message) addBattleLog(x.message);
+    });
+
+    if (!isBattleContinuable()) return;
+    addBattleLog('あなたのターン');
+    state.waitingAction = true;
+    setCommandEnabled(true);
+  }
+
+  async function processBattleEnd(data) {
+    state.pendingBattleEnd = true;
+    state.waitingAction = false;
+    setCommandEnabled(false);
+    addBattleLog(data.message || '戦闘終了');
+    if (data.result === 'win' && data.rewards) {
+      addBattleLog(`経験値 +${data.rewards.exp} / お金 +${data.rewards.money}`);
+    }
+    addBattleLog('「冒険へ戻る」を押すとダンジョン一覧に戻ります。');
   }
 
   function ratio(value, max) {
