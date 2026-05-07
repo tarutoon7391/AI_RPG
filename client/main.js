@@ -1,6 +1,6 @@
 (function () {
   const SAVE_KEY = 'ai_rpg_save';
-  const JOB_OPTIONS = ['戦士', '魔法使い', '僧侶', '盗賊', '狩人', '格闘家', 'まものつかい'];
+  const BEGINNER_JOB_OPTIONS = ['戦士', '魔法使い', '僧侶', '盗賊', '狩人', '格闘家', 'まものつかい'];
   const EQUIP_SLOT_LABELS = {
     head: '頭',
     body: '体',
@@ -40,7 +40,7 @@
   };
   const DEFAULT_CHARACTER_UI = {
     selectedJobName: '戦士',
-    beginnerJobs: JOB_OPTIONS,
+    beginnerJobs: BEGINNER_JOB_OPTIONS,
     equipment: DEFAULT_EQUIPPED,
     equipmentInventory: DEFAULT_EQUIP_INVENTORY,
   };
@@ -165,10 +165,16 @@
   function sanitizeBeginnerJobs(value, fallback) {
     const source = getArray(value)
       .map((x) => (typeof x === 'string' ? x.trim() : ''))
-      .filter(Boolean);
+      .filter((x) => BEGINNER_JOB_OPTIONS.includes(x));
     if (!source.length) return fallback;
-    const uniqueJobs = [...new Set([...source, ...JOB_OPTIONS])];
-    return uniqueJobs;
+    return [...new Set(source)];
+  }
+
+  function firstString(...values) {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return null;
   }
 
   function sanitizeEquipmentInventory(value, defaults) {
@@ -233,9 +239,11 @@
           : defaults.battle.preferredCommand,
       },
       character: {
-        selectedJobName: typeof characterSrc.selectedJobName === 'string'
-          ? characterSrc.selectedJobName
-          : (typeof src.selectedJobName === 'string' ? src.selectedJobName : defaults.character.selectedJobName),
+        selectedJobName: firstString(
+          characterSrc.selectedJobName,
+          src.selectedJobName,
+          defaults.character.selectedJobName
+        ),
         beginnerJobs: sanitizeBeginnerJobs(characterSrc.beginnerJobs, defaults.character.beginnerJobs),
         equipment: {
           head: typeof equipmentSrc.head === 'string'
@@ -807,9 +815,6 @@
       state.characterData = character;
       if (character.job_name && typeof character.job_name === 'string') {
         state.save.character.selectedJobName = character.job_name;
-        if (!state.save.character.beginnerJobs.includes(character.job_name)) {
-          state.save.character.beginnerJobs = [...state.save.character.beginnerJobs, character.job_name];
-        }
         persistSave();
       }
       renderCharacterView();
