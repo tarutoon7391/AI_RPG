@@ -257,3 +257,9 @@ button.secondary,
   border-radius: 10px;
   padding: 14px;
 }
+
+.skill-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}

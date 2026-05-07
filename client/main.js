@@ -48,6 +48,9 @@
     modal: document.getElementById('modal'),
     modalMessage: document.getElementById('modal-message'),
     modalClose: document.getElementById('modal-close'),
+    skillModal: document.getElementById('skill-modal'),
+    skillList: document.getElementById('skill-list'),
+    skillCancel: document.getElementById('skill-cancel'),
     enemyName: document.getElementById('enemy-name'),
     enemyHpText: document.getElementById('enemy-hp-text'),
     enemyHpBar: document.getElementById('enemy-hp-bar'),
@@ -140,6 +143,11 @@
 
   function hideModal() {
     els.modal.classList.add('hidden');
+  }
+
+  function hideSkillModal() {
+    els.skillModal.classList.add('hidden');
+    els.skillList.textContent = '';
   }
 
   function setActiveTab(tab) {
@@ -280,24 +288,21 @@
       sendBattleAction('attack', null);
       return;
     }
-
-    let chosen = null;
-    for (const skill of state.playerSkills) {
-      if (skill && typeof skill.name === 'string') {
-        const yes = window.confirm(`${skill.name} を使いますか？`);
-        if (yes) {
-          chosen = skill;
-          break;
-        }
-      }
-    }
-
-    if (chosen) {
-      sendBattleAction('skill', chosen.id);
-      return;
-    }
-    setCommandEnabled(true);
-    state.waitingAction = true;
+    els.skillList.textContent = '';
+    state.playerSkills
+      .filter((skill) => skill && typeof skill.name === 'string')
+      .forEach((skill) => {
+        const button = document.createElement('button');
+        const mpCost = skill.mp_cost > 0 ? `（MP${skill.mp_cost}）` : '';
+        button.type = 'button';
+        button.textContent = `${skill.name}${mpCost}`;
+        button.addEventListener('click', () => {
+          hideSkillModal();
+          sendBattleAction('skill', skill.id);
+        });
+        els.skillList.appendChild(button);
+      });
+    els.skillModal.classList.remove('hidden');
   }
 
   function setBattleVisible(visible) {
@@ -376,6 +381,19 @@
     els.modalClose.addEventListener('click', hideModal);
     els.modal.addEventListener('click', (e) => {
       if (e.target === els.modal) hideModal();
+    });
+
+    els.skillCancel.addEventListener('click', () => {
+      hideSkillModal();
+      setCommandEnabled(true);
+      state.waitingAction = true;
+    });
+    els.skillModal.addEventListener('click', (e) => {
+      if (e.target === els.skillModal) {
+        hideSkillModal();
+        setCommandEnabled(true);
+        state.waitingAction = true;
+      }
     });
 
     els.commandButtons.forEach((btn) => {
