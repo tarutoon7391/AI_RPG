@@ -285,8 +285,8 @@
 
   function isBattleContinuable() {
     const battle = state.battleState;
-    if (!battle || state.pendingBattleEnd) return false;
-    const playerAlive = (battle.player?.hp || 0) > 0;
+    if (!battle || !battle.player || state.pendingBattleEnd) return false;
+    const playerAlive = battle.player.hp > 0;
     const hasAliveEnemy = (battle.monsters || []).some((m) => m && m.isAlive);
     return playerAlive && hasAliveEnemy;
   }
@@ -300,18 +300,20 @@
 
     const { playerAction, enemyAction, extras } = splitTurnActions(data.actions);
 
-    if (playerAction) addBattleLog(playerAction.message || 'プレイヤーが行動した。');
+    if (playerAction?.message) addBattleLog(playerAction.message);
     await wait(1000);
     await playDamageEffect(playerAction);
     await wait(1000);
 
-    if (isBattleContinuable()) {
+    let canContinue = isBattleContinuable();
+    if (canContinue) {
       addBattleLog('敵のターン');
       await wait(1000);
     }
 
-    if (enemyAction && isBattleContinuable()) {
-      addBattleLog(enemyAction.message || '敵が行動した。');
+    canContinue = isBattleContinuable();
+    if (enemyAction && canContinue) {
+      if (enemyAction.message) addBattleLog(enemyAction.message);
       await wait(1000);
       await playDamageEffect(enemyAction);
       await wait(1000);
