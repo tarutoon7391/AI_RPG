@@ -55,8 +55,11 @@ async function loadCharacter(userId) {
 /**
  * ダンジョンのモンスターをランダムに選択してエンカウント用に準備する
  */
-async function pickMonster(floor) {
-  const result = await db.query('SELECT * FROM monsters ORDER BY RANDOM() LIMIT 1');
+async function pickMonster(dungeonId, floor) {
+  const isBeginnerMeadow = Number(dungeonId) === 1;
+  const result = isBeginnerMeadow
+    ? await db.query('SELECT * FROM monsters WHERE id = 1 LIMIT 1')
+    : await db.query('SELECT * FROM monsters ORDER BY RANDOM() LIMIT 1');
   if (result.rowCount === 0) return null;
   const monster = result.rows[0];
 
@@ -164,7 +167,7 @@ function registerSocketHandlers(io) {
           return;
         }
 
-        const monster = await pickMonster(floor || 1);
+        const monster = await pickMonster(dungeonId || 1, floor || 1);
         if (!monster) {
           socket.emit('battle:error', { message: 'モンスターデータが見つかりません' });
           return;
