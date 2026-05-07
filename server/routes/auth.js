@@ -59,10 +59,6 @@ router.post('/register', async (req, res) => {
 
     const user = result.rows[0];
 
-    // 登録成功時にそのままログイン状態にする
-    req.session.userId = user.id;
-    req.session.username = user.username;
-
     return res.status(201).json({ user });
   } catch (err) {
     // eslint-disable-next-line no-console

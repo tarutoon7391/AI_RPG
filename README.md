@@ -28,6 +28,7 @@ AI_RPG/
 ├── client/          ブラウザ向け資産（静的配信）
 │   ├── index.html
 │   ├── login.html / login.js
+│   ├── register.html / register.js
 │   ├── lobby.html / lobby.js
 │   └── css/
 ├── db/

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI_RPG 新規作成</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#0f1923" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>AI_RPG</h1>
+      <p>新規作成してください</p>
+    </header>
+
+    <main id="main-content">
+      <section class="panel">
+        <h2>新規作成</h2>
+        <label>ユーザー名<input id="register-username" type="text" maxlength="32" autocomplete="username" /></label>
+        <label>メールアドレス<input id="register-email" type="email" maxlength="254" autocomplete="email" /></label>
+        <label>パスワード<input id="register-password" type="password" maxlength="128" autocomplete="new-password" /></label>
+        <label>パスワード確認<input id="register-password-confirm" type="password" maxlength="128" autocomplete="new-password" /></label>
+        <div class="auth-actions">
+          <button id="register-btn" type="button">登録</button>
+        </div>
+        <p id="register-error" class="error-text"></p>
+        <p><a href="/login.html">ログインはこちら</a></p>
+      </section>
+    </main>
+  </div>
+
+  <script src="/register.js"></script>
+</body>
+</html>
