@@ -54,14 +54,22 @@
     const dpr = getDevicePixelRatio();
     const realWidth = Math.round(cssWidth * dpr);
     const realHeight = Math.round(cssHeight * dpr);
+    const cssWidthPx = `${cssWidth}px`;
+    const cssHeightPx = `${cssHeight}px`;
 
-    if (canvas.style.width !== `${cssWidth}px`) canvas.style.width = `${cssWidth}px`;
-    if (canvas.style.height !== `${cssHeight}px`) canvas.style.height = `${cssHeight}px`;
+    if (canvas.style.width !== cssWidthPx || canvas.style.height !== cssHeightPx) {
+      canvas.style.width = cssWidthPx;
+      canvas.style.height = cssHeightPx;
+    }
     if (canvas.width !== realWidth) canvas.width = realWidth;
     if (canvas.height !== realHeight) canvas.height = realHeight;
   };
 
-  syncCanvasResolution();
+  if (game.isBooted) {
+    syncCanvasResolution();
+  } else {
+    game.events.once('ready', syncCanvasResolution);
+  }
   window.addEventListener('resize', syncCanvasResolution);
   window.addEventListener('orientationchange', syncCanvasResolution);
 
