@@ -72,7 +72,7 @@ SELECT setval('skills_id_seq', (SELECT MAX(id) FROM skills));
 -- job_skills: 戦士スキル紐付け
 -- ======================
 INSERT INTO job_skills (job_id, skill_id) VALUES
-  (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10)
+  (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10)
 ON CONFLICT DO NOTHING;
 
 -- ======================

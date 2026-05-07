@@ -845,12 +845,12 @@
 
   function openSkillPicker() {
     if (!state.playerSkills.length) {
-      sendBattleAction('attack', null);
+      addBattleLog('スキルがありません');
       return;
     }
     const aliveTarget = (state.battleState?.monsters || []).find((m) => m.isAlive);
     if (!aliveTarget) {
-      sendBattleAction('attack', null);
+      addBattleLog('対象となるモンスターがいません');
       return;
     }
     els.skillList.textContent = '';
