@@ -350,12 +350,12 @@
     els.authPanel.classList.remove('hidden');
     els.homeView.classList.add('hidden');
     els.tabBar.classList.add('hidden');
-    els.statusText.textContent = '未ログイン';
+    els.statusText.textContent = 'ログイン状態: 未ログイン';
   }
 
   function showLobbyView(user) {
     state.user = user;
-    els.statusText.textContent = `${state.user.username} でログイン中`;
+    els.statusText.textContent = `ログイン状態: ${state.user.username} でログイン中`;
     els.authPanel.classList.add('hidden');
     els.homeView.classList.remove('hidden');
     els.tabBar.classList.remove('hidden');
@@ -411,9 +411,14 @@
         method: 'POST',
         credentials: 'same-origin',
       });
-      const data = await res.json().catch(() => ({}));
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (_e) {
+        data = null;
+      }
       if (!res.ok) {
-        showModal(data.error || 'ログアウトに失敗しました');
+        showModal((data && data.error) || 'ログアウトに失敗しました');
         return;
       }
       showLoginView();
@@ -479,7 +484,7 @@
   async function init() {
     state.save = loadSaveData();
     bindEvents();
-    els.statusText.textContent = '認証確認中...';
+    els.statusText.textContent = 'ログイン状態: 認証確認中...';
 
     try {
       const user = await fetchCurrentUser();
