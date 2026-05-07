@@ -9,8 +9,24 @@ const bcrypt = require('bcryptjs');
 
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
+const DEFAULT_CHARACTER_PROFILE = {
+  jobId: 1,
+  element: 'none',
+  hp: 200,
+  maxHp: 200,
+  mp: 50,
+  maxMp: 50,
+  attack: 60,
+  defense: 30,
+  recovery: 20,
+  speed: 40,
+  critRate: 5.0,
+  evasionRate: 5.0,
+  charm: 10,
+};
 
 // ユーザー名・パスワードのバリデーション
 function validateCredentials(username, password) {
@@ -41,8 +57,14 @@ function validateCharacterName(characterName) {
   return null;
 }
 
+const authWriteRateLimit = createRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 20,
+  keyGenerator: (req) => `${req.ip || 'unknown'}:${(req.body && req.body.username) || ''}`,
+});
+
 // POST /api/auth/register
-router.post('/register', async (req, res) => {
+router.post('/register', authWriteRateLimit, async (req, res) => {
   const { username, password, characterName } = req.body || {};
   const validationError = validateCredentials(username, password);
   if (validationError) {
@@ -81,18 +103,34 @@ router.post('/register', async (req, res) => {
       `INSERT INTO characters (
         user_id, name, current_job_id, element, hp, max_hp, mp, max_mp, attack, defense, recovery, speed, crit_rate, evasion_rate, charm
       ) VALUES (
-        $1, $2, 1, 'none', 200, 200, 50, 50, 60, 30, 20, 40, 5.00, 5.00, 10
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
       )`,
-      [user.id, characterName.trim()]
+      [
+        user.id,
+        characterName.trim(),
+        DEFAULT_CHARACTER_PROFILE.jobId,
+        DEFAULT_CHARACTER_PROFILE.element,
+        DEFAULT_CHARACTER_PROFILE.hp,
+        DEFAULT_CHARACTER_PROFILE.maxHp,
+        DEFAULT_CHARACTER_PROFILE.mp,
+        DEFAULT_CHARACTER_PROFILE.maxMp,
+        DEFAULT_CHARACTER_PROFILE.attack,
+        DEFAULT_CHARACTER_PROFILE.defense,
+        DEFAULT_CHARACTER_PROFILE.recovery,
+        DEFAULT_CHARACTER_PROFILE.speed,
+        DEFAULT_CHARACTER_PROFILE.critRate,
+        DEFAULT_CHARACTER_PROFILE.evasionRate,
+        DEFAULT_CHARACTER_PROFILE.charm,
+      ]
     );
 
     await client.query(
       `INSERT INTO character_jobs (character_id, job_id, level, exp)
-       SELECT c.id, 1, 1, 0
+       SELECT c.id, $2, 1, 0
        FROM characters c
        WHERE c.user_id = $1
        ON CONFLICT (character_id, job_id) DO NOTHING`,
-      [user.id]
+      [user.id, DEFAULT_CHARACTER_PROFILE.jobId]
     );
 
     await client.query('COMMIT');
@@ -113,7 +151,7 @@ router.post('/register', async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', authWriteRateLimit, async (req, res) => {
   const { username, password } = req.body || {};
   if (typeof username !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: 'ユーザー名とパスワードを指定してください' });
@@ -141,7 +179,7 @@ router.post('/login', async (req, res) => {
 
     req.session.userId = user.id;
     req.session.username = user.username;
-    req.session.currentJobId = user.current_job_id || 1;
+    req.session.currentJobId = user.current_job_id || DEFAULT_CHARACTER_PROFILE.jobId;
 
     return res.json({
       user: { id: user.id, username: user.username, name: user.character_name || user.username },
@@ -175,7 +213,7 @@ router.get('/me', requireAuth, (req, res) => {
     user: {
       id: req.session.userId,
       username: req.session.username,
-      currentJobId: req.session.currentJobId || 1,
+      currentJobId: req.session.currentJobId || DEFAULT_CHARACTER_PROFILE.jobId,
     },
   });
 });

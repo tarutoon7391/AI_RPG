@@ -4,8 +4,14 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
+const characterJobRateLimit = createRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 30,
+  keyGenerator: (req) => `user:${req.session && req.session.userId ? req.session.userId : req.ip || 'unknown'}`,
+});
 
 async function fetchSkillsByJobId(jobId) {
   if (!jobId) return [];
@@ -55,7 +61,7 @@ router.get('/me', requireAuth, async (req, res) => {
 });
 
 // POST /api/character/job - 転職
-router.post('/job', requireAuth, async (req, res) => {
+router.post('/job', requireAuth, characterJobRateLimit, async (req, res) => {
   const { jobName } = req.body || {};
   if (typeof jobName !== 'string' || !jobName.trim()) {
     return res.status(400).json({ error: '職業名を指定してください' });
@@ -109,6 +115,12 @@ router.post('/job', requireAuth, async (req, res) => {
     await client.query('COMMIT');
 
     req.session.currentJobId = job.id;
+    await new Promise((resolve, reject) => {
+      req.session.save((saveErr) => {
+        if (saveErr) return reject(saveErr);
+        return resolve();
+      });
+    });
     const skills = await fetchSkillsByJobId(job.id);
 
     return res.json({

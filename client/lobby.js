@@ -693,7 +693,11 @@
   }
 
   function cloneBattleState(battle) {
-    return battle ? JSON.parse(JSON.stringify(battle)) : null;
+    if (!battle) return null;
+    if (typeof structuredClone === 'function') {
+      return structuredClone(battle);
+    }
+    return JSON.parse(JSON.stringify(battle));
   }
 
   function applyActionToBattleState(battle, action) {
@@ -981,10 +985,7 @@
         return;
       }
       state.save.character.selectedJobName = data.currentJobName || jobName;
-      state.playerSkills = [];
-      if (Array.isArray(data.skills)) {
-        state.playerSkills = data.skills;
-      }
+      state.playerSkills = Array.isArray(data.skills) ? data.skills : [];
       persistSave();
       await loadCharacterProfile();
       renderCharacterView();
