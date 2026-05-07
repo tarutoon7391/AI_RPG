@@ -225,6 +225,15 @@
     state.socket = null;
   }
 
+  function resetSessionState() {
+    state.user = null;
+    state.battleState = null;
+    state.waitingAction = false;
+    disconnectSocket();
+    setBattleVisible(false);
+    setCommandEnabled(false);
+  }
+
   function addBattleLog(message) {
     const line = document.createElement('div');
     line.textContent = message;
@@ -337,12 +346,7 @@
   }
 
   function showLoginView() {
-    state.user = null;
-    state.battleState = null;
-    state.waitingAction = false;
-    disconnectSocket();
-    setBattleVisible(false);
-    setCommandEnabled(false);
+    resetSessionState();
     els.authPanel.classList.remove('hidden');
     els.homeView.classList.add('hidden');
     els.tabBar.classList.add('hidden');
@@ -365,8 +369,12 @@
       credentials: 'same-origin',
     });
     if (!res.ok) return null;
-    const data = await res.json().catch(() => ({}));
-    return data.user || null;
+    try {
+      const data = await res.json();
+      return data && data.user ? data.user : null;
+    } catch (_e) {
+      return null;
+    }
   }
 
   async function auth() {
