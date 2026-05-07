@@ -34,6 +34,15 @@ class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // バージョン表示（右下）
+    this.add
+      .text(width - 8, height - 8, window.AI_RPG.version || 'v0.1.0', {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        color: '#666666',
+      })
+      .setOrigin(1, 1);
+
     // 入力（マウスもタッチも pointerdown で統一）
     this.input.once('pointerdown', () => {
       this.scene.start('LoginScene');

@@ -24,10 +24,14 @@
     scene: [TitleScene, LoginScene, HomeScene, DungeonScene, BattleScene],
   };
 
+  // バージョン定数
+  const VERSION = 'v0.1.0';
+
   // グローバル状態（最低限）
   window.AI_RPG = {
     user: null, // { id, username }
     socket: null,
+    version: VERSION,
   };
 
   const game = new Phaser.Game(config);

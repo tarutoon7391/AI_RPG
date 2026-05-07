@@ -90,6 +90,15 @@ class HomeScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
 
+    // バージョン表示（右下）
+    this.add
+      .text(width - 8, height - 8, window.AI_RPG.version || 'v0.1.0', {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        color: '#666666',
+      })
+      .setOrigin(1, 1);
+
     if (tabKey === 'adventure') {
       this._renderAdventureTab(width, height);
     } else {
