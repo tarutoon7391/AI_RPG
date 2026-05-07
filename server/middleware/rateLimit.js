@@ -3,9 +3,20 @@
 
 function createRateLimiter({ windowMs, maxRequests, keyGenerator }) {
   const records = new Map();
+  let sweepCounter = 0;
 
   return function rateLimit(req, res, next) {
     const now = Date.now();
+    sweepCounter += 1;
+    if (sweepCounter >= 100) {
+      sweepCounter = 0;
+      for (const [entryKey, entry] of records.entries()) {
+        if (now >= entry.resetAt) {
+          records.delete(entryKey);
+        }
+      }
+    }
+
     const key = typeof keyGenerator === 'function'
       ? keyGenerator(req)
       : (req.ip || 'unknown');
