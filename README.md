@@ -27,7 +27,8 @@ AI_RPG/
 │   └── middleware/
 ├── client/          ブラウザ向け資産（静的配信）
 │   ├── index.html
-│   ├── main.js
+│   ├── login.html / login.js
+│   ├── lobby.html / lobby.js
 │   └── css/
 ├── db/
 │   ├── migrate.js   マイグレーションランナー
