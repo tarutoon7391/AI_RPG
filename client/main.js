@@ -44,6 +44,9 @@
     equipment: DEFAULT_EQUIPPED,
     equipmentInventory: DEFAULT_EQUIP_INVENTORY,
   };
+  const POPUP_HEIGHT_BUFFER = 200;
+  const POPUP_WIDTH_BUFFER = 270;
+  const POPUP_MIN_MARGIN = 8;
 
   const defaultSave = {
     version: 3,
@@ -164,8 +167,8 @@
       .map((x) => (typeof x === 'string' ? x.trim() : ''))
       .filter(Boolean);
     if (!source.length) return fallback;
-    const merged = [...new Set([...source, ...JOB_OPTIONS])];
-    return merged;
+    const uniqueJobs = [...new Set([...source, ...JOB_OPTIONS])];
+    return uniqueJobs;
   }
 
   function sanitizeEquipmentInventory(value, defaults) {
@@ -371,6 +374,10 @@
     return `${n > 0 ? '+' : ''}${Number.isInteger(n) ? n : n.toFixed(2)}`;
   }
 
+  function formatRate(value) {
+    return toNumber(value, 0).toFixed(2).replace(/\.00$/, '');
+  }
+
   function formatItemEffect(item) {
     if (!item) return '-';
     const bonus = getObject(item.bonus);
@@ -424,8 +431,8 @@
     els.charDef.textContent = String(Math.max(0, base.defense + bonus.defense));
     els.charRec.textContent = String(Math.max(0, base.recovery + bonus.recovery));
     els.charSpd.textContent = String(Math.max(0, base.speed + bonus.speed));
-    els.charCrit.textContent = (base.critRate + bonus.critRate).toFixed(2).replace(/\.00$/, '');
-    els.charEva.textContent = (base.evasionRate + bonus.evasionRate).toFixed(2).replace(/\.00$/, '');
+    els.charCrit.textContent = formatRate(base.critRate + bonus.critRate);
+    els.charEva.textContent = formatRate(base.evasionRate + bonus.evasionRate);
     els.charCharm.textContent = String(Math.max(0, base.charm + bonus.charm));
 
     renderEquipmentRows();
@@ -445,10 +452,10 @@
     state.popup.slot = slot || null;
     els.miniPopup.classList.remove('hidden');
     els.miniPopup.setAttribute('aria-hidden', 'false');
-    const top = Math.min(window.innerHeight - 200, rect.bottom + 4);
-    const left = Math.min(window.innerWidth - 270, Math.max(8, rect.left));
-    els.miniPopup.style.top = `${Math.max(8, top)}px`;
-    els.miniPopup.style.left = `${Math.max(8, left)}px`;
+    const top = Math.min(window.innerHeight - POPUP_HEIGHT_BUFFER, rect.bottom + 4);
+    const left = Math.min(window.innerWidth - POPUP_WIDTH_BUFFER, Math.max(POPUP_MIN_MARGIN, rect.left));
+    els.miniPopup.style.top = `${Math.max(POPUP_MIN_MARGIN, top)}px`;
+    els.miniPopup.style.left = `${Math.max(POPUP_MIN_MARGIN, left)}px`;
   }
 
   function equipItem(slot, itemId) {
