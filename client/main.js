@@ -34,7 +34,7 @@
     authPass: document.getElementById('auth-password'),
     authError: document.getElementById('auth-error'),
     loginBtn: document.getElementById('login-btn'),
-    registerBtn: document.getElementById('register-btn'),
+    logoutBtn: document.getElementById('logout-btn'),
     homeView: document.getElementById('home-view'),
     dungeonList: document.getElementById('dungeon-list'),
     mainDungeonList: document.getElementById('main-dungeon-list'),
@@ -241,6 +241,21 @@
     });
   }
 
+  function disconnectSocket() {
+    if (!state.socket) return;
+    state.socket.disconnect();
+    state.socket = null;
+  }
+
+  function resetSessionState() {
+    state.user = null;
+    state.battleState = null;
+    state.waitingAction = false;
+    disconnectSocket();
+    setBattleVisible(false);
+    setCommandEnabled(false);
+  }
+
   function addBattleLog(message) {
     const line = document.createElement('div');
     line.textContent = message;
@@ -352,7 +367,39 @@
     persistSave();
   }
 
-  async function auth(endpoint) {
+  function showLoginView() {
+    resetSessionState();
+    els.authPanel.classList.remove('hidden');
+    els.homeView.classList.add('hidden');
+    els.tabBar.classList.add('hidden');
+    els.statusText.textContent = 'ログイン状態: 未ログイン';
+  }
+
+  function showLobbyView(user) {
+    state.user = user;
+    els.statusText.textContent = `ログイン状態: ${state.user.username} でログイン中`;
+    els.authPanel.classList.add('hidden');
+    els.homeView.classList.remove('hidden');
+    els.tabBar.classList.remove('hidden');
+    connectSocket();
+    setActiveTab(state.save.ui.activeTab);
+  }
+
+  async function fetchCurrentUser() {
+    const res = await fetch('/api/auth/me', {
+      method: 'GET',
+      credentials: 'same-origin',
+    });
+    if (!res.ok) return null;
+    try {
+      const data = await res.json();
+      return data && data.user ? data.user : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  async function auth() {
     els.authError.textContent = '';
     const username = els.authUser.value.trim();
     const password = els.authPass.value;
@@ -362,7 +409,7 @@
     }
 
     try {
-      const res = await fetch(`/api/auth/${endpoint}`, {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -373,21 +420,38 @@
         els.authError.textContent = data.error || '通信エラーが発生しました';
         return;
       }
-      state.user = data.user;
-      els.statusText.textContent = `${state.user.username} でログイン中`;
-      els.authPanel.classList.add('hidden');
-      els.homeView.classList.remove('hidden');
-      els.tabBar.classList.remove('hidden');
-      connectSocket();
-      setActiveTab(state.save.ui.activeTab);
+      showLobbyView(data.user);
     } catch (_e) {
       els.authError.textContent = 'ネットワークエラーが発生しました';
     }
   }
 
+  async function logout() {
+    els.authError.textContent = '';
+    try {
+      const res = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (_e) {
+        data = null;
+      }
+      if (!res.ok) {
+        showModal((data && data.error) || 'ログアウトに失敗しました');
+        return;
+      }
+      showLoginView();
+    } catch (_e) {
+      showModal('ネットワークエラーが発生しました');
+    }
+  }
+
   function bindEvents() {
-    els.loginBtn.addEventListener('click', () => auth('login'));
-    els.registerBtn.addEventListener('click', () => auth('register'));
+    els.loginBtn.addEventListener('click', auth);
+    els.logoutBtn.addEventListener('click', logout);
 
     els.mainDungeonCategoryBtn.addEventListener('click', showMainDungeonList);
     els.mainDungeonBtn.addEventListener('click', requestBattleStart);
@@ -441,11 +505,21 @@
     });
   }
 
-  function init() {
+  async function init() {
     state.save = loadSaveData();
     bindEvents();
-    setBattleVisible(false);
-    setCommandEnabled(false);
+    els.statusText.textContent = 'ログイン状態: 認証確認中...';
+
+    try {
+      const user = await fetchCurrentUser();
+      if (user) {
+        showLobbyView(user);
+        return;
+      }
+      showLoginView();
+    } catch (_e) {
+      showLoginView();
+    }
   }
 
   init();
