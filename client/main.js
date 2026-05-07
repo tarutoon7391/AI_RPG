@@ -460,10 +460,12 @@
     state.popup.slot = slot || null;
     els.miniPopup.classList.remove('hidden');
     els.miniPopup.setAttribute('aria-hidden', 'false');
-    const top = Math.min(window.innerHeight - POPUP_HEIGHT_BUFFER, rect.bottom + 4);
-    const left = Math.min(window.innerWidth - POPUP_WIDTH_BUFFER, Math.max(POPUP_MIN_MARGIN, rect.left));
-    els.miniPopup.style.top = `${Math.max(POPUP_MIN_MARGIN, top)}px`;
-    els.miniPopup.style.left = `${Math.max(POPUP_MIN_MARGIN, left)}px`;
+    const maxTop = Math.max(POPUP_MIN_MARGIN, window.innerHeight - POPUP_HEIGHT_BUFFER);
+    const maxLeft = Math.max(POPUP_MIN_MARGIN, window.innerWidth - POPUP_WIDTH_BUFFER);
+    const top = Math.min(maxTop, Math.max(POPUP_MIN_MARGIN, rect.bottom + 4));
+    const left = Math.min(maxLeft, Math.max(POPUP_MIN_MARGIN, rect.left));
+    els.miniPopup.style.top = `${top}px`;
+    els.miniPopup.style.left = `${left}px`;
   }
 
   function equipItem(slot, itemId) {
@@ -814,7 +816,10 @@
       if (!character) return;
       state.characterData = character;
       if (character.job_name && typeof character.job_name === 'string') {
-        state.save.character.selectedJobName = character.job_name;
+        const incomingJobName = character.job_name.trim();
+        if (state.save.character.beginnerJobs.includes(incomingJobName)) {
+          state.save.character.selectedJobName = incomingJobName;
+        }
         persistSave();
       }
       renderCharacterView();
