@@ -613,6 +613,10 @@ function processTurn(battleState, playerAction) {
 
 function getBattleState(battleState) {
   return {
+    dungeonId: battleState.dungeonId,
+    floor: battleState.floor,
+    encounterIndex: Number(battleState.encounterIndex) || 0,
+    encounterTotal: Number(battleState.encounterTotal) || 1,
     player: {
       id: battleState.player.id,
       name: battleState.player.name,
