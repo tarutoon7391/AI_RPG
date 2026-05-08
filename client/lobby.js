@@ -1,6 +1,25 @@
 (function () {
   const SAVE_KEY = 'ai_rpg_save';
   const BEGINNER_JOB_OPTIONS = ['戦士', '魔法使い', '僧侶', '盗賊', '狩人', '格闘家', 'まものつかい'];
+  const ADVANCED_JOB_OPTIONS = ['未実装'];
+  const SPECIAL_JOB_OPTIONS = ['未実装'];
+  const JOB_TAB_DEFINITIONS = [
+    { key: 'beginner', label: '基本職', jobs: BEGINNER_JOB_OPTIONS, selectable: true, unlockMessage: '' },
+    {
+      key: 'advanced',
+      label: '上級職',
+      jobs: ADVANCED_JOB_OPTIONS,
+      selectable: false,
+      unlockMessage: '解放条件: 上級職は未実装のため現在は選択できません',
+    },
+    {
+      key: 'special',
+      label: '特級職',
+      jobs: SPECIAL_JOB_OPTIONS,
+      selectable: false,
+      unlockMessage: '解放条件: 特級職は未実装のため現在は選択できません',
+    },
+  ];
   const EQUIP_SLOT_LABELS = {
     head: '頭',
     body: '体',
@@ -96,6 +115,7 @@
     popup: {
       type: null,
       slot: null,
+      jobTab: 'beginner',
     },
     turnSequence: Promise.resolve(),
     pendingBattleEnd: false,
@@ -110,6 +130,7 @@
     authPass: document.getElementById('auth-password'),
     authError: document.getElementById('auth-error'),
     loginBtn: document.getElementById('login-btn'),
+    registerBtn: document.getElementById('register-btn'),
     logoutBtn: document.getElementById('logout-btn'),
     homeView: document.getElementById('home-view'),
     characterView: document.getElementById('character-view'),
@@ -503,6 +524,7 @@
   function closeMiniPopup() {
     state.popup.type = null;
     state.popup.slot = null;
+    state.popup.jobTab = 'beginner';
     els.miniPopup.classList.add('hidden');
     els.miniPopup.setAttribute('aria-hidden', 'true');
     els.miniPopup.textContent = '';
@@ -556,18 +578,68 @@
     return changeJobOnServer(jobName);
   }
 
-  function openJobPopup(anchorEl) {
+  function getJobLevelByName(jobName) {
+    const char = state.characterData || {};
+    const jobLevels = getObject(char.job_levels);
+    const levelFromMap = toInt(jobLevels[jobName], 0);
+    if (levelFromMap > 0) return levelFromMap;
+    if (char.job_name === jobName) return toInt(char.job_level, 1);
+    return 1;
+  }
+
+  function renderJobPopup() {
     const current = state.save.character.selectedJobName;
+    const tab = JOB_TAB_DEFINITIONS.find((item) => item.key === state.popup.jobTab) || JOB_TAB_DEFINITIONS[0];
+    const jobs = tab.key === 'beginner' ? state.save.character.beginnerJobs : tab.jobs;
     els.miniPopup.textContent = '';
-    openMiniPopup(anchorEl, 'job', null);
-    state.save.character.beginnerJobs.forEach((jobName) => {
+
+    const tabsWrap = document.createElement('div');
+    tabsWrap.className = 'job-popup-tabs';
+    JOB_TAB_DEFINITIONS.forEach((item) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = jobName;
-      btn.classList.toggle('active', jobName === current);
-      btn.addEventListener('click', () => changeJob(jobName));
-      els.miniPopup.appendChild(btn);
+      btn.className = 'job-popup-tab-btn';
+      btn.textContent = item.label;
+      btn.classList.toggle('active', item.key === tab.key);
+      btn.addEventListener('click', () => {
+        state.popup.jobTab = item.key;
+        renderJobPopup();
+      });
+      tabsWrap.appendChild(btn);
     });
+    els.miniPopup.appendChild(tabsWrap);
+
+    const listWrap = document.createElement('div');
+    listWrap.className = 'job-popup-list';
+    jobs.forEach((jobName) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'job-popup-job-btn';
+      const level = getJobLevelByName(jobName);
+      const nameEl = document.createElement('span');
+      nameEl.className = 'job-name';
+      nameEl.textContent = jobName;
+      const levelEl = document.createElement('span');
+      levelEl.className = 'job-level';
+      levelEl.textContent = tab.selectable ? `Lv${level}` : 'Lv-';
+      btn.appendChild(nameEl);
+      btn.appendChild(levelEl);
+      btn.classList.toggle('active', tab.selectable && jobName === current);
+      if (tab.selectable) {
+        btn.addEventListener('click', () => changeJob(jobName));
+      } else {
+        btn.disabled = true;
+        btn.title = tab.unlockMessage;
+      }
+      listWrap.appendChild(btn);
+    });
+    els.miniPopup.appendChild(listWrap);
+  }
+
+  function openJobPopup(anchorEl) {
+    openMiniPopup(anchorEl, 'job', null);
+    state.popup.jobTab = 'beginner';
+    renderJobPopup();
   }
 
   function showModal(message) {
@@ -1163,7 +1235,10 @@
       const data = await res.json();
       if (!data || !data.character) return null;
       return {
-        character: data.character,
+        character: {
+          ...data.character,
+          job_levels: getObject(data.jobLevels),
+        },
         skills: Array.isArray(data.skills) ? data.skills : [],
       };
     } catch (_e) {
@@ -1271,6 +1346,11 @@
 
   function bindEvents() {
     els.loginBtn.addEventListener('click', auth);
+    if (els.registerBtn) {
+      els.registerBtn.addEventListener('click', () => {
+        location.href = '/register.html';
+      });
+    }
     els.logoutBtn.addEventListener('click', logout);
 
     els.mainDungeonCategoryBtn.addEventListener('click', showMainDungeonList);

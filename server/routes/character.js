@@ -23,6 +23,23 @@ async function fetchSkillsByCharacterJobId(characterId, jobId) {
   return fetchLearnedSkills(db, characterId, jobId);
 }
 
+async function fetchJobLevelsByCharacterId(characterId) {
+  if (!characterId) return {};
+  const result = await db.query(
+    `SELECT j.name AS job_name, cj.level AS job_level
+     FROM character_jobs cj
+     INNER JOIN jobs j ON j.id = cj.job_id
+     WHERE cj.character_id = $1`,
+    [characterId]
+  );
+  return result.rows.reduce((acc, row) => {
+    if (!row || typeof row.job_name !== 'string') return acc;
+    const level = Number(row.job_level);
+    acc[row.job_name] = Number.isFinite(level) && level > 0 ? Math.round(level) : 1;
+    return acc;
+  }, {});
+}
+
 // GET /api/character/me
 router.get('/me', requireAuth, async (req, res) => {
   try {
@@ -55,8 +72,9 @@ router.get('/me', requireAuth, async (req, res) => {
       char.job_level || 1
     );
     const skills = await fetchSkillsByCharacterJobId(char.id, char.current_job_id);
+    const jobLevels = await fetchJobLevelsByCharacterId(char.id);
 
-    return res.json({ character: char, skills });
+    return res.json({ character: char, skills, jobLevels });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[character.me] エラー:', err);
