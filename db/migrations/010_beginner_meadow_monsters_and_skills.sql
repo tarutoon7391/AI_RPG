@@ -16,7 +16,7 @@ INSERT INTO skills (
   effect_type, effect_value, effect_duration, effect_chance, is_special, description
 ) VALUES
   (81, '体当たり',         'none', 'physical', 100,  0, 'single', NULL,          NULL, NULL, 100, FALSE, '通常攻撃'),
-  (82, '毒粘液',           'none', 'physical', 100,  4, 'single', 'poison',       50,   3,   50, FALSE, '50%で毒付与（攻撃力50%ダメージ/3ターン）'),
+  (82, '毒粘液',           'none', 'physical', 100,  4, 'single', 'poison',       50,   3,   50, FALSE, '50%で毒付与（攻撃力の50%ダメージ/3ターン）'),
   (83, 'つるたたき',       'wood', 'physical', 100,  0, 'single', NULL,          NULL, NULL, 100, FALSE, '通常攻撃'),
   (84, '光合成',           'none', 'heal',       0,  6, 'self',   'heal_max_hp_percent', 40, NULL, 100, FALSE, '最大HPの40%を回復'),
   (85, 'ぶん殴る',         'none', 'physical', 100,  0, 'single', NULL,          NULL, NULL, 100, FALSE, '通常攻撃'),

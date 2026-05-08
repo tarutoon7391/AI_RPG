@@ -10,16 +10,16 @@ const STATUS_TYPES = {
   CURSE: 'curse',
 };
 
-function clampTurns(turns, fallback = 1) {
+function normalizeTurns(turns, fallback = 1) {
   const n = Number(turns);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(fallback, Math.floor(n));
 }
 
-function clampPercent(value, fallback = 0) {
+function normalizePercent(value, fallback = 0) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
-  return n;
+  return Math.max(0, Math.min(100, n));
 }
 
 /**
@@ -33,8 +33,8 @@ function applyStatusEffect(target, config) {
   if (!target.statusEffects) target.statusEffects = [];
 
   const type = String(config.type);
-  const turns = clampTurns(config.turns, 1);
-  const value = clampPercent(config.value, 0);
+  const turns = normalizeTurns(config.turns, 1);
+  const value = normalizePercent(config.value, 0);
   const sourceAttack = Math.max(0, Number(config.sourceAttack) || 0);
 
   const entry = {
@@ -102,7 +102,7 @@ function processStatusEffectTick(combatant) {
       events.push({ type: e.type, damage: dmg, combatantId: combatant.id });
     }
 
-    e.turns = clampTurns((e.turns || 1) - 1, 0);
+    e.turns = normalizeTurns((e.turns || 1) - 1, 0);
     return e.turns > 0;
   });
 

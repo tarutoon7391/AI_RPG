@@ -179,8 +179,8 @@ function tickBuffs(buffs) {
 }
 
 function checkEffectChance(skill) {
-  const chance = Number(skill?.effect_chance);
-  if (!Number.isFinite(chance)) return true;
+  const rawChance = Number(skill?.effect_chance);
+  const chance = Number.isFinite(rawChance) ? rawChance : 100;
   return Math.random() * 100 < Math.max(0, Math.min(100, chance));
 }
 
