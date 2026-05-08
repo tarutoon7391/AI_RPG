@@ -10,14 +10,14 @@ INSERT INTO skills (
 ) VALUES
   (92,  '[DEBUG] 毒付与（自分）',       'none', 'status',  0, 0, 'self',   'poison',     50, 3, 100, FALSE, TRUE, '自分に毒を付与（100%、攻撃力の50%ダメージ、3ターン）'),
   (93,  '[DEBUG] 素早さアップ（自分）', 'none', 'buff',    0, 0, 'self',   'speed_up',   20, 3, 100, FALSE, TRUE, '自分の素早さを20%アップ（3ターン）'),
-  (94,  '[DEBUG] 素早さダウン（自分）', 'none', 'buff',    0, 0, 'self',   'speed_down', 30, 2, 100, FALSE, TRUE, '自分の素早さを30%ダウン（2ターン）'),
+  (94,  '[DEBUG] 素早さダウン（自分）', 'none', 'debuff',  0, 0, 'self',   'speed_down', 30, 2, 100, FALSE, TRUE, '自分の素早さを30%ダウン（2ターン）'),
   (95,  '[DEBUG] 防御アップ（自分）',   'none', 'buff',    0, 0, 'self',   'defense_up', 30, 3, 100, FALSE, TRUE, '自分の防御力をアップ（3ターン）'),
   (96,  '[DEBUG] 攻撃アップ（自分）',   'none', 'buff',    0, 0, 'self',   'attack_up',  30, 3, 100, FALSE, TRUE, '自分の攻撃力をアップ（3ターン）'),
   (97,  '[DEBUG] 毒付与（敵）',         'none', 'status',  0, 0, 'single', 'poison',     50, 3, 100, FALSE, TRUE, '対象の敵に毒を付与（100%、攻撃力の50%ダメージ、3ターン）'),
-  (98,  '[DEBUG] 素早さアップ（敵）',   'none', 'debuff',  0, 0, 'single', 'speed_up',   20, 3, 100, FALSE, TRUE, '対象の敵の素早さを20%アップ（3ターン）'),
+  (98,  '[DEBUG] 素早さアップ（敵）',   'none', 'buff',    0, 0, 'single', 'speed_up',   20, 3, 100, FALSE, TRUE, '対象の敵の素早さを20%アップ（3ターン）'),
   (99,  '[DEBUG] 素早さダウン（敵）',   'none', 'debuff',  0, 0, 'single', 'speed_down', 30, 2, 100, FALSE, TRUE, '対象の敵の素早さを30%ダウン（2ターン）'),
-  (100, '[DEBUG] 防御アップ（敵）',     'none', 'debuff',  0, 0, 'single', 'defense_up', 30, 3, 100, FALSE, TRUE, '対象の敵の防御力をアップ（3ターン）'),
-  (101, '[DEBUG] 攻撃アップ（敵）',     'none', 'debuff',  0, 0, 'single', 'attack_up',  30, 3, 100, FALSE, TRUE, '対象の敵の攻撃力をアップ（3ターン）')
+  (100, '[DEBUG] 防御アップ（敵）',     'none', 'buff',    0, 0, 'single', 'defense_up', 30, 3, 100, FALSE, TRUE, '対象の敵の防御力をアップ（3ターン）'),
+  (101, '[DEBUG] 攻撃アップ（敵）',     'none', 'buff',    0, 0, 'single', 'attack_up',  30, 3, 100, FALSE, TRUE, '対象の敵の攻撃力をアップ（3ターン）')
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   element = EXCLUDED.element,
