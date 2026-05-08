@@ -10,6 +10,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const { syncJobProgress } = require('../services/skillProgression');
 
 const router = express.Router();
 const DEFAULT_CHARACTER_PROFILE = {
@@ -99,12 +100,13 @@ router.post('/register', authWriteRateLimit, async (req, res) => {
     );
     const user = result.rows[0];
 
-    await client.query(
+    const characterResult = await client.query(
       `INSERT INTO characters (
         user_id, name, current_job_id, element, hp, max_hp, mp, max_mp, attack, defense, recovery, speed, crit_rate, evasion_rate, charm
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-      )`,
+      )
+      RETURNING id`,
       [
         user.id,
         characterName.trim(),
@@ -123,15 +125,13 @@ router.post('/register', authWriteRateLimit, async (req, res) => {
         DEFAULT_CHARACTER_PROFILE.charm,
       ]
     );
+    const character = characterResult.rows[0];
 
-    await client.query(
-      `INSERT INTO character_jobs (character_id, job_id, level, exp)
-       SELECT c.id, $2, 1, 0
-       FROM characters c
-       WHERE c.user_id = $1
-       ON CONFLICT (character_id, job_id) DO NOTHING`,
-      [user.id, DEFAULT_CHARACTER_PROFILE.jobId]
-    );
+    await syncJobProgress(client, {
+      characterId: character.id,
+      jobId: DEFAULT_CHARACTER_PROFILE.jobId,
+      gainedExp: 0,
+    });
 
     await client.query('COMMIT');
 

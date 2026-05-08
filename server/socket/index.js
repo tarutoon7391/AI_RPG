@@ -19,6 +19,11 @@
 
 const db = require('../db');
 const { processTurn, getBattleState, calculateRewards } = require('../battle/engine');
+const {
+  ensureLearnedSkillsUpToLevel,
+  fetchLearnedSkills,
+  syncJobProgress,
+} = require('../services/skillProgression');
 
 // socketId → battleState のインメモリストア
 const activeBattles = new Map();
@@ -31,9 +36,10 @@ const BATTLE_END_DELAY = 300;
  */
 async function loadCharacter(userId) {
   const charResult = await db.query(
-    `SELECT c.*, u.username
+    `SELECT c.*, u.username, COALESCE(cj.level, 1) AS job_level
      FROM characters c
      INNER JOIN users u ON u.id = c.user_id
+     LEFT JOIN character_jobs cj ON cj.character_id = c.id AND cj.job_id = c.current_job_id
      WHERE c.user_id = $1
      LIMIT 1`,
     [userId]
@@ -46,17 +52,83 @@ async function loadCharacter(userId) {
 
   let skills = [];
   if (char.current_job_id) {
-    const skillResult = await db.query(
-      `SELECT s.* FROM skills s
-       INNER JOIN job_skills js ON js.skill_id = s.id
-       WHERE js.job_id = $1
-       ORDER BY s.id`,
-      [char.current_job_id]
+    const progress = await syncJobProgress(db, {
+      characterId: char.id,
+      jobId: char.current_job_id,
+      gainedExp: 0,
+    });
+    await ensureLearnedSkillsUpToLevel(
+      db,
+      char.id,
+      char.current_job_id,
+      progress.levelAfter || char.job_level || 1
     );
-    skills = skillResult.rows;
+    skills = await fetchLearnedSkills(db, char.id, char.current_job_id);
+    char.job_level = progress.levelAfter || char.job_level || 1;
   }
   char.skills = skills;
   return char;
+}
+
+async function applyBattleRewards(userId, rewards) {
+  if (!userId || !rewards || (rewards.exp <= 0 && rewards.money <= 0)) {
+    return null;
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const charResult = await client.query(
+      `SELECT id, current_job_id
+       FROM characters
+       WHERE user_id = $1
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (charResult.rowCount === 0) {
+      await client.query('COMMIT');
+      return null;
+    }
+
+    const char = charResult.rows[0];
+
+    await client.query(
+      `UPDATE characters
+       SET exp = exp + $1, money = money + $2, updated_at = NOW()
+       WHERE id = $3`,
+      [rewards.exp, rewards.money, char.id]
+    );
+
+    let levelUp = null;
+    let skills = [];
+    if (char.current_job_id) {
+      const progress = await syncJobProgress(client, {
+        characterId: char.id,
+        jobId: char.current_job_id,
+        gainedExp: rewards.exp,
+      });
+      skills = await fetchLearnedSkills(client, char.id, char.current_job_id);
+      levelUp = {
+        levelBefore: progress.levelBefore,
+        levelAfter: progress.levelAfter,
+        learnedSkillNames: (progress.newlyLearnedSkills || []).map((s) => s.name),
+      };
+    }
+
+    await client.query('COMMIT');
+    return { levelUp, skills };
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      // eslint-disable-next-line no-console
+      console.error('[socket] 報酬更新ロールバックエラー:', rollbackError);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -220,7 +292,7 @@ function registerSocketHandlers(io) {
     });
 
     // バトル行動処理
-    socket.on('battle:action', (payload, ack) => {
+    socket.on('battle:action', async (payload, ack) => {
       // eslint-disable-next-line no-console
       console.log('[socket] battle:action', payload);
 
@@ -262,22 +334,31 @@ function registerSocketHandlers(io) {
 
         activeBattles.delete(socket.id);
 
+        let rewardResult = null;
         if (result === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
-          db.query(
-            `UPDATE characters SET exp = exp + $1, money = money + $2, updated_at = NOW()
-             WHERE user_id = $3`,
-            [rewards.exp, rewards.money, userId]
-          ).catch((err) => {
+          try {
+            rewardResult = await applyBattleRewards(userId, rewards);
+          } catch (err) {
             // eslint-disable-next-line no-console
             console.error('[socket] 報酬更新エラー:', err);
-          });
+          }
         }
 
+        const endPayload = {
+          result,
+          rewards,
+          message: getBattleEndMessage(result),
+          playerSkills: rewardResult && Array.isArray(rewardResult.skills)
+            ? rewardResult.skills
+            : battleState.player.skills || [],
+          levelUp: rewardResult ? rewardResult.levelUp : null,
+        };
+
         if (result === 'escape') {
-          socket.emit('battle:end', { result, rewards, message: getBattleEndMessage(result) });
+          socket.emit('battle:end', endPayload);
         } else {
           setTimeout(() => {
-            socket.emit('battle:end', { result, rewards, message: getBattleEndMessage(result) });
+            socket.emit('battle:end', endPayload);
           }, BATTLE_END_DELAY);
         }
       }

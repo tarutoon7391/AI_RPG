@@ -787,8 +787,25 @@
     state.waitingAction = false;
     setCommandEnabled(false);
     addBattleLog(data.message || '戦闘終了');
+    if (Array.isArray(data.playerSkills)) {
+      state.playerSkills = data.playerSkills;
+    }
+    if (data.levelUp && typeof data.levelUp === 'object') {
+      const before = toInt(data.levelUp.levelBefore, 1);
+      const after = toInt(data.levelUp.levelAfter, before);
+      if (after > before) {
+        addBattleLog(`レベルアップ！ Lv${before} → Lv${after}`);
+      }
+      const learnedSkillNames = Array.isArray(data.levelUp.learnedSkillNames)
+        ? data.levelUp.learnedSkillNames.filter((x) => typeof x === 'string' && x.trim())
+        : [];
+      learnedSkillNames.forEach((name) => {
+        addBattleLog(`スキル習得: ${name}`);
+      });
+    }
     if (data.result === 'win' && data.rewards) {
       addBattleLog(`経験値 +${data.rewards.exp} / お金 +${data.rewards.money}`);
+      await loadCharacterProfile();
     }
     addBattleLog('「冒険へ戻る」を押すとダンジョン一覧に戻ります。');
   }

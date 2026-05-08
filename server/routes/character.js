@@ -5,6 +5,11 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const {
+  ensureLearnedSkillsUpToLevel,
+  fetchLearnedSkills,
+  syncJobProgress,
+} = require('../services/skillProgression');
 
 const router = express.Router();
 const characterJobRateLimit = createRateLimiter({
@@ -13,16 +18,9 @@ const characterJobRateLimit = createRateLimiter({
   keyGenerator: (req) => `user:${req.session && req.session.userId ? req.session.userId : req.ip || 'unknown'}`,
 });
 
-async function fetchSkillsByJobId(jobId) {
-  if (!jobId) return [];
-  const skillResult = await db.query(
-    `SELECT s.* FROM skills s
-     INNER JOIN job_skills js ON js.skill_id = s.id
-     WHERE js.job_id = $1
-     ORDER BY s.id`,
-    [jobId]
-  );
-  return skillResult.rows;
+async function fetchSkillsByCharacterJobId(characterId, jobId) {
+  if (!characterId || !jobId) return [];
+  return fetchLearnedSkills(db, characterId, jobId);
 }
 
 // GET /api/character/me
@@ -50,7 +48,13 @@ router.get('/me', requireAuth, async (req, res) => {
     }
 
     // スキル一覧（現在の職業のスキル）
-    const skills = await fetchSkillsByJobId(char.current_job_id);
+    await ensureLearnedSkillsUpToLevel(
+      db,
+      char.id,
+      char.current_job_id,
+      char.job_level || 1
+    );
+    const skills = await fetchSkillsByCharacterJobId(char.id, char.current_job_id);
 
     return res.json({ character: char, skills });
   } catch (err) {
@@ -105,12 +109,11 @@ router.post('/job', requireAuth, characterJobRateLimit, async (req, res) => {
       [job.id, character.id]
     );
 
-    await client.query(
-      `INSERT INTO character_jobs (character_id, job_id, level, exp)
-       VALUES ($1, $2, 1, 0)
-       ON CONFLICT (character_id, job_id) DO NOTHING`,
-      [character.id, job.id]
-    );
+    await syncJobProgress(client, {
+      characterId: character.id,
+      jobId: job.id,
+      gainedExp: 0,
+    });
 
     await client.query('COMMIT');
 
@@ -121,7 +124,7 @@ router.post('/job', requireAuth, characterJobRateLimit, async (req, res) => {
         return resolve();
       });
     });
-    const skills = await fetchSkillsByJobId(job.id);
+    const skills = await fetchSkillsByCharacterJobId(character.id, job.id);
 
     return res.json({
       ok: true,
