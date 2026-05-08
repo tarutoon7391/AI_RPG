@@ -137,7 +137,7 @@ async function applyBattleRewards(userId, rewards) {
 async function pickMonster(dungeonId, floor) {
   const isBeginnerMeadow = Number(dungeonId) === 1;
   const result = isBeginnerMeadow
-    ? await db.query('SELECT * FROM monsters WHERE id = 1 LIMIT 1')
+    ? await db.query('SELECT * FROM monsters WHERE id BETWEEN 1 AND 6 ORDER BY RANDOM() LIMIT 1')
     : await db.query('SELECT * FROM monsters ORDER BY RANDOM() LIMIT 1');
   if (result.rowCount === 0) return null;
   const monster = result.rows[0];
@@ -165,14 +165,18 @@ async function pickMonster(dungeonId, floor) {
   monster.element = monster.base_element;
   monster.buffs = [];
   monster.statusEffects = [];
+  monster.turnCount = 0;
+  monster.escaped = false;
+  monster.aiState = { specialCooldown: 3 };
 
   return monster;
 }
 
 function getBattleEndMessage(result) {
-  if (result === 'win')    return '勝利！';
-  if (result === 'lose')   return '敗北...';
+  if (result === 'win') return '勝利！';
+  if (result === 'lose') return '敗北...';
   if (result === 'escape') return '逃走した！';
+  if (result === 'enemy_escape') return '逃げられた';
   return '戦闘終了';
 }
 

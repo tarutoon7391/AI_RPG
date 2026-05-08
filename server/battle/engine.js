@@ -1,28 +1,43 @@
 // バトルエンジン
-// ダメージ計算・ターン処理・敵AIロジックを担当する
 
-const { checkActionRestriction, processStatusEffectTick } = require('./statusEffects');
+const {
+  checkActionRestriction,
+  processStatusEffectTick,
+  applyStatusEffect,
+  STATUS_TYPES,
+} = require('./statusEffects');
 
-// ===== 通常攻撃スキル定数 =====
 const NORMAL_ATTACK = {
-  id: 0, name: '通常攻撃', element: 'none', skill_type: 'physical', power: 100, mp_cost: 0,
+  id: 0,
+  name: '通常攻撃',
+  element: 'none',
+  skill_type: 'physical',
+  power: 100,
+  mp_cost: 0,
+  target: 'single',
 };
 
-// ===== 属性相性テーブル =====
 const ELEMENT_TABLE = {
-  fire:  { wood: 1.5, water: 0.5 },
-  water: { fire: 1.5, wood:  0.5 },
-  wood:  { water: 1.5, fire: 0.5 },
+  fire: { wood: 1.5, water: 0.5 },
+  water: { fire: 1.5, wood: 0.5 },
+  wood: { water: 1.5, fire: 0.5 },
   light: { dark: 1.5 },
-  dark:  { light: 1.5 },
+  dark: { light: 1.5 },
 };
 
-/**
- * 属性相性補正値を返す
- * @param {string} atkElement - 攻撃側属性
- * @param {string} defElement - 防御側属性
- * @returns {number}
- */
+const STATUS_LABELS = {
+  [STATUS_TYPES.POISON]: '毒',
+  [STATUS_TYPES.BURN]: 'やけど',
+};
+
+const STAT_BUFF_KEY = {
+  attack: 'attack',
+  defense: 'defense',
+  speed: 'speed',
+  crit_rate: 'crit',
+  evasion_rate: 'evasion',
+};
+
 function getElementMultiplier(atkElement, defElement) {
   if (!atkElement || !defElement) return 1.0;
   const row = ELEMENT_TABLE[atkElement];
@@ -30,15 +45,9 @@ function getElementMultiplier(atkElement, defElement) {
   return row[defElement] || 1.0;
 }
 
-/**
- * 会心判定を行う
- * @param {number} critRate - 会心率（%、0〜200）
- * @returns {{ isCrit: boolean, isSupercrit: boolean, multiplier: number }}
- */
 function processCrit(critRate) {
-  const rate = Math.min(200, Math.max(0, critRate));
+  const rate = Math.min(200, Math.max(0, Number(critRate) || 0));
   if (rate >= 100) {
-    // 会心確定
     const superCritChance = rate - 100;
     const isSupercrit = Math.random() * 100 < superCritChance;
     return { isCrit: true, isSupercrit, multiplier: isSupercrit ? 2.0 : 1.5 };
@@ -47,113 +56,220 @@ function processCrit(critRate) {
   return { isCrit, isSupercrit: false, multiplier: isCrit ? 1.5 : 1.0 };
 }
 
-/**
- * ダメージを計算する
- * 式: 攻撃力 × (スキル倍率) × 属性相性補正 - 防御力 × 0.5
- * 最低1ダメージ保証
- * @param {object} attacker - 攻撃者ステータス
- * @param {object} skill    - スキルデータ（power: 倍率×100）
- * @param {object} target   - 防御者ステータス
- * @param {object} buffs    - attacker のバフ情報
- * @returns {{ damage: number, isCrit: boolean, isSupercrit: boolean, missed: boolean }}
- */
-function calculateDamage(attacker, skill, target, buffs) {
-  // 回避判定
-  const missed = Math.random() * 100 < (target.evasion_rate || 0);
+function getBuffModifierPercent(buffs, buffKey) {
+  if (!Array.isArray(buffs) || !buffKey) return 0;
+  return buffs.reduce((sum, b) => {
+    if (!b || typeof b.type !== 'string') return sum;
+    if (b.type === `${buffKey}_up`) return sum + (Number(b.value) || 0);
+    if (b.type === `${buffKey}_down`) return sum - (Number(b.value) || 0);
+    return sum;
+  }, 0);
+}
+
+function getEffectiveStat(combatant, statKey, buffs) {
+  const base = Number(combatant?.[statKey]) || 0;
+  const buffKey = STAT_BUFF_KEY[statKey];
+  const percent = getBuffModifierPercent(buffs || combatant?.buffs || [], buffKey);
+  const adjusted = base * (1 + percent / 100);
+  return Math.max(0, adjusted);
+}
+
+function calculateDamage(attacker, skill, target, attackerBuffs, targetBuffs) {
+  const effectiveEvasion = Math.max(0, Math.min(100, getEffectiveStat(target, 'evasion_rate', targetBuffs)));
+  const missed = Math.random() * 100 < effectiveEvasion;
   if (missed) return { damage: 0, isCrit: false, isSupercrit: false, missed: true };
 
-  // 実際の攻撃力（バフ適用）
-  let atkPower = attacker.attack;
-  const defenseBuff = (buffs || []).find((b) => b.type === 'defense_up');
-  const defValue = defenseBuff
-    ? target.defense * (1 + defenseBuff.value / 100)
-    : target.defense;
+  const atkPower = getEffectiveStat(attacker, 'attack', attackerBuffs);
+  const defValue = getEffectiveStat(target, 'defense', targetBuffs);
+  const powerMultiplier = (Number(skill?.power) || 100) / 100;
+  const elementMult = getElementMultiplier(skill?.element || 'none', target?.element || 'none');
 
-  const powerMultiplier = (skill.power || 100) / 100;
-  const elementMult = getElementMultiplier(skill.element || 'none', target.element || 'none');
-
-  // 会心判定（バフ適用）
-  const critBuff = (buffs || []).find((b) => b.type === 'crit_up');
-  const effectiveCrit = (attacker.crit_rate || 0) + (critBuff ? critBuff.value : 0);
+  const effectiveCrit = getEffectiveStat(attacker, 'crit_rate', attackerBuffs);
   const { isCrit, isSupercrit, multiplier } = processCrit(effectiveCrit);
 
-  const rawDamage =
-    atkPower * powerMultiplier * elementMult * multiplier - defValue * 0.5;
-
+  const rawDamage = atkPower * powerMultiplier * elementMult * multiplier - defValue * 0.5;
   const damage = Math.max(1, Math.floor(rawDamage));
   return { damage, isCrit, isSupercrit, missed: false };
 }
 
-/**
- * 敵AIが行動するスキルを選択する
- * - 通常時: ランダム選択（MP不足なら通常攻撃）
- * - HP50%以下: スキルリスト後半を2倍の重みで選択
- * @param {object} monster - モンスター戦闘状態
- * @returns {object} 選択されたスキル
- */
-function selectEnemyAction(monster) {
-  const skills = monster.skills || [];
-
-  if (skills.length === 0) return NORMAL_ATTACK;
-
-  // MP足りるスキルのみ候補に
-  const usable = skills.filter((s) => (s.mp_cost || 0) <= monster.mp);
-  if (usable.length === 0) return NORMAL_ATTACK;
-
-  const isLowHp = monster.hp <= monster.max_hp * 0.5;
-
-  if (!isLowHp) {
-    return usable[Math.floor(Math.random() * usable.length)];
-  }
-
-  // HP50%以下: 後半スキルを2倍重み
-  const half = Math.ceil(usable.length / 2);
-  const weights = usable.map((_, i) => (i >= half ? 2 : 1));
-  const total = weights.reduce((a, b) => a + b, 0);
-  let rnd = Math.random() * total;
-  for (let i = 0; i < usable.length; i++) {
-    rnd -= weights[i];
-    if (rnd <= 0) return usable[i];
-  }
-  return usable[usable.length - 1];
+function randomChoice(list) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return list[Math.floor(Math.random() * list.length)];
 }
 
-/**
- * バフ/デバフを適用する
- * 同じバフ・デバフは新しい方で上書き、異なるものは共存
- * @param {Array} buffs - 既存バフ配列
- * @param {string} type - バフ種別
- * @param {number} value - 効果値
- * @param {number} turns - 持続ターン数（バフ3 / デバフ2）
- * @returns {Array} 更新後のバフ配列
- */
+function getSkillByName(monster, name) {
+  return (monster.skills || []).find((s) => s && s.name === name) || null;
+}
+
+function pickSkillByNames(monster, names) {
+  const candidates = names
+    .map((name) => getSkillByName(monster, name))
+    .filter((s) => s && (Number(s.mp_cost) || 0) <= (Number(monster.mp) || 0));
+  return randomChoice(candidates);
+}
+
+function selectEnemyAction(monster) {
+  const fallback = NORMAL_ATTACK;
+  const skills = Array.isArray(monster.skills)
+    ? monster.skills.filter((s) => (Number(s.mp_cost) || 0) <= (Number(monster.mp) || 0))
+    : [];
+  if (skills.length === 0) return fallback;
+
+  const name = monster.name;
+
+  if (name === 'スライム') {
+    return getSkillByName(monster, '体当たり') || skills[0] || fallback;
+  }
+
+  if (name === 'ポイズンスライム') {
+    return pickSkillByNames(monster, ['体当たり', '毒粘液']) || skills[0] || fallback;
+  }
+
+  if (name === 'くさばな') {
+    return pickSkillByNames(monster, ['つるたたき', '光合成']) || skills[0] || fallback;
+  }
+
+  if (name === 'ちびゴブリン') {
+    return pickSkillByNames(monster, ['ぶん殴る', '俊敏']) || skills[0] || fallback;
+  }
+
+  if (name === 'メタルスライム') {
+    if ((monster.turnCount || 0) <= 2) {
+      return getSkillByName(monster, 'メタル体当たり') || skills[0] || fallback;
+    }
+    if (Math.random() < 0.5) {
+      return getSkillByName(monster, '逃げる') || getSkillByName(monster, 'メタル体当たり') || skills[0] || fallback;
+    }
+    return getSkillByName(monster, 'メタル体当たり') || skills[0] || fallback;
+  }
+
+  if (name === 'グリーンスライムキング') {
+    if (!monster.aiState) monster.aiState = { specialCooldown: 3 };
+
+    const normalSkill = pickSkillByNames(monster, ['押しつぶす', '粘液放出']) || skills[0] || fallback;
+    const specialSkill = getSkillByName(monster, '全力体当たり（必殺）');
+
+    if ((monster.aiState.specialCooldown || 0) > 0) {
+      monster.aiState.specialCooldown -= 1;
+      return normalSkill;
+    }
+
+    if (specialSkill && Math.random() < 0.6) {
+      monster.aiState.specialCooldown = 3;
+      return specialSkill;
+    }
+
+    return normalSkill;
+  }
+
+  return randomChoice(skills) || fallback;
+}
+
 function applyBuff(buffs, type, value, turns) {
-  const filtered = buffs.filter((b) => b.type !== type);
-  filtered.push({ type, value, turns });
+  const safeTurns = Math.max(1, Math.floor(Number(turns) || 1));
+  const filtered = (Array.isArray(buffs) ? buffs : []).filter((b) => b.type !== type);
+  filtered.push({ type, value: Number(value) || 0, turns: safeTurns });
   return filtered;
 }
 
-/**
- * ターン終了時にバフ/デバフのターン数を減らす
- * @param {Array} buffs - バフ配列
- * @returns {Array} 更新後のバフ配列
- */
 function tickBuffs(buffs) {
-  return buffs
-    .map((b) => ({ ...b, turns: b.turns - 1 }))
+  return (Array.isArray(buffs) ? buffs : [])
+    .map((b) => ({ ...b, turns: (Number(b.turns) || 0) - 1 }))
     .filter((b) => b.turns > 0);
 }
 
-/**
- * 1ターンを処理する
- * @param {object} battleState - 現在のバトル状態
- * @param {object} playerAction - プレイヤーの行動
- * @returns {{ actions: Array, state: object, battleOver: boolean, result: string }}
- */
+function checkEffectChance(skill) {
+  const chance = Number(skill?.effect_chance);
+  if (!Number.isFinite(chance)) return true;
+  return Math.random() * 100 < Math.max(0, Math.min(100, chance));
+}
+
+function applySkillEffect({ attacker, target, skill }) {
+  if (!skill || !target || !skill.effect_type) return null;
+  if (!checkEffectChance(skill)) return null;
+
+  const effectType = skill.effect_type;
+  const value = Number(skill.effect_value) || 0;
+  const duration = Math.max(1, Math.floor(Number(skill.effect_duration) || 1));
+
+  if (effectType === 'poison') {
+    const applied = applyStatusEffect(target, {
+      type: STATUS_TYPES.POISON,
+      turns: duration,
+      value,
+      sourceAttack: getEffectiveStat(attacker, 'attack', attacker.buffs || []),
+    });
+    return applied ? effectType : null;
+  }
+
+  if (effectType.endsWith('_up') || effectType.endsWith('_down')) {
+    target.buffs = applyBuff(target.buffs || [], effectType, value, duration);
+    return effectType;
+  }
+
+  return null;
+}
+
+function processEndOfTurn(combatant, actorType, actions) {
+  combatant.buffs = tickBuffs(combatant.buffs || []);
+  const statusEvents = processStatusEffectTick(combatant);
+
+  for (const ev of statusEvents) {
+    actions.push({
+      actorType: 'system',
+      actorId: null,
+      actionType: 'status_damage',
+      targetId: combatant.id,
+      skillName: null,
+      specialSkill: false,
+      damage: ev.damage,
+      heal: 0,
+      statusEffect: ev.type,
+      isCrit: false,
+      isSupercrit: false,
+      missed: false,
+      message: `${combatant.name} は ${STATUS_LABELS[ev.type] || ev.type} のダメージ ${ev.damage}！`,
+    });
+  }
+
+  if (combatant.hp <= 0 && actorType === 'monster' && !combatant.escaped) {
+    actions.push({
+      actorType: 'system',
+      actorId: null,
+      actionType: 'defeated',
+      targetId: combatant.id,
+      skillName: null,
+      specialSkill: false,
+      damage: 0,
+      heal: 0,
+      statusEffect: null,
+      isCrit: false,
+      isSupercrit: false,
+      missed: false,
+      message: `${combatant.name} を倒した！`,
+    });
+  }
+}
+
+function getAliveMonsters(monsters) {
+  return (monsters || []).filter((m) => m.hp > 0 && !m.escaped);
+}
+
+function resolveBattleEnd(monsters) {
+  const alive = getAliveMonsters(monsters);
+  if (alive.length > 0) return null;
+
+  const hasDefeatedEnemy = (monsters || []).some((m) => m.hp <= 0 && !m.escaped);
+  if (hasDefeatedEnemy) return 'win';
+
+  const allEscaped = (monsters || []).length > 0 && (monsters || []).every((m) => m.escaped || m.hp <= 0);
+  return allEscaped ? 'enemy_escape' : null;
+}
+
 function processTurn(battleState, playerAction) {
   const { player, monsters } = battleState;
-  // 生存モンスターのみ対象
-  const aliveMonsters = monsters.filter((m) => m.hp > 0);
+  const aliveMonsters = getAliveMonsters(monsters);
+
   if (aliveMonsters.length === 0) {
     return { actions: [], state: getBattleState(battleState), battleOver: true, result: 'win' };
   }
@@ -162,264 +278,326 @@ function processTurn(battleState, playerAction) {
   let battleOver = false;
   let result = null;
 
-  // 逃走処理
   if (playerAction.actionType === 'escape') {
-    const escapeChance = Math.min(90, 30 + (player.speed - aliveMonsters[0].speed) * 2);
+    const enemySpeed = getEffectiveStat(aliveMonsters[0], 'speed', aliveMonsters[0].buffs || []);
+    const playerSpeed = getEffectiveStat(player, 'speed', player.buffs || []);
+    const escapeChance = Math.min(90, 30 + (playerSpeed - enemySpeed) * 2);
     if (Math.random() * 100 < escapeChance) {
       actions.push({
-        actorType: 'player', actorId: player.id,
-        actionType: 'escape', targetId: null,
+        actorType: 'player', actorId: player.id, actionType: 'escape', targetId: null,
+        skillName: null, specialSkill: false,
         damage: 0, heal: 0, statusEffect: null,
         isCrit: false, isSupercrit: false, missed: false,
         message: '逃げ切った！',
       });
       return { actions, state: getBattleState(battleState), battleOver: true, result: 'escape' };
-    } else {
-      actions.push({
-        actorType: 'player', actorId: player.id,
-        actionType: 'escape', targetId: null,
-        damage: 0, heal: 0, statusEffect: null,
-        isCrit: false, isSupercrit: false, missed: false,
-        message: '逃げられなかった！',
-      });
     }
+    actions.push({
+      actorType: 'player', actorId: player.id, actionType: 'escape', targetId: null,
+      skillName: null, specialSkill: false,
+      damage: 0, heal: 0, statusEffect: null,
+      isCrit: false, isSupercrit: false, missed: false,
+      message: '逃げられなかった！',
+    });
   }
 
-  // 行動順決定（素早さ順、同値は50%ランダム）
   const participants = [
     { type: 'player', data: player },
     ...aliveMonsters.map((m) => ({ type: 'monster', data: m })),
   ];
+
   participants.sort((a, b) => {
-    const diff = b.data.speed - a.data.speed;
+    const aSpeed = getEffectiveStat(a.data, 'speed', a.data.buffs || []);
+    const bSpeed = getEffectiveStat(b.data, 'speed', b.data.buffs || []);
+    const diff = bSpeed - aSpeed;
     if (diff !== 0) return diff;
     return Math.random() < 0.5 ? -1 : 1;
   });
 
   for (const participant of participants) {
-    // 既に戦闘が終わっているなら残りの行動をスキップ
     if (battleOver) break;
 
     if (participant.type === 'player') {
-      // プレイヤーターン（逃走以外）
-      if (playerAction.actionType === 'escape') continue;
+      if (player.hp <= 0) continue;
+      if (playerAction.actionType === 'escape') {
+        processEndOfTurn(player, 'player', actions);
+        if (player.hp <= 0) {
+          battleOver = true;
+          result = 'lose';
+        }
+        continue;
+      }
 
       const restriction = checkActionRestriction(player);
       if (!restriction.canAct) {
         actions.push({
           actorType: 'player', actorId: player.id,
           actionType: 'skip', targetId: null,
+          skillName: null, specialSkill: false,
           damage: 0, heal: 0, statusEffect: null,
           isCrit: false, isSupercrit: false, missed: false,
           message: '行動できない！',
         });
-        continue;
-      }
+      } else {
+        const currentAliveMonsters = getAliveMonsters(monsters);
+        const targetMonster = currentAliveMonsters.find(
+          (m) => String(m.id) === String(playerAction.targetId)
+        ) || currentAliveMonsters[0];
 
-      // 対象モンスター
-      const targetMonster = aliveMonsters.find(
-        (m) => String(m.id) === String(playerAction.targetId)
-      ) || aliveMonsters[0];
+        if (playerAction.actionType === 'skill' || playerAction.actionType === 'attack') {
+          const skill = playerAction.skill || NORMAL_ATTACK;
+          const actualSkill = restriction.forceNormalAttack ? NORMAL_ATTACK : skill;
 
-      if (playerAction.actionType === 'skill' || playerAction.actionType === 'attack') {
-        const skill = playerAction.skill || NORMAL_ATTACK;
-
-        // 呪い状態なら通常攻撃に強制
-        const actualSkill = restriction.forceNormalAttack ? NORMAL_ATTACK : skill;
-
-        // 混乱：自分自身へのダメージ（通常攻撃）
-        if (restriction.selfAttack) {
-          const { damage } = calculateDamage(player, NORMAL_ATTACK, player, []);
-          player.hp = Math.max(0, player.hp - damage);
-          actions.push({
-            actorType: 'player', actorId: player.id,
-            actionType: 'attack', targetId: player.id,
-            skillName: '通常攻撃（混乱）',
-            damage, heal: 0, statusEffect: null,
-            isCrit: false, isSupercrit: false, missed: false,
-            message: `${player.name} は混乱して自分を攻撃した！ ${damage} のダメージ！`,
-          });
-          if (player.hp <= 0) {
-            battleOver = true;
-            result = 'lose';
-          }
-          continue;
-        }
-
-        // MP消費
-        player.mp = Math.max(0, player.mp - (actualSkill.mp_cost || 0));
-
-        // 捨て身斬り：自HP20%消費
-        if (actualSkill.effect_type === 'self_hp_cost') {
-          const selfCost = Math.floor(player.max_hp * (actualSkill.effect_value / 100));
-          player.hp = Math.max(1, player.hp - selfCost);
-        }
-
-        if (actualSkill.skill_type === 'buff') {
-          // バフスキル
-          player.buffs = applyBuff(
-            player.buffs || [],
-            actualSkill.effect_type,
-            actualSkill.effect_value,
-            actualSkill.effect_duration || 3
-          );
-          actions.push({
-            actorType: 'player', actorId: player.id,
-            actionType: 'skill', targetId: player.id,
-            skillName: actualSkill.name,
-            damage: 0, heal: 0, statusEffect: actualSkill.effect_type,
-            isCrit: false, isSupercrit: false, missed: false,
-            message: `${player.name} は ${actualSkill.name} を使った！`,
-          });
-        } else {
-          // 攻撃スキル
-          const { damage, isCrit, isSupercrit, missed } = calculateDamage(
-            player, actualSkill, targetMonster, player.buffs || []
-          );
-          if (!missed) targetMonster.hp = Math.max(0, targetMonster.hp - damage);
-
-          actions.push({
-            actorType: 'player', actorId: player.id,
-            actionType: playerAction.actionType, targetId: targetMonster.id,
-            skillName: actualSkill.name,
-            damage, heal: 0, statusEffect: null,
-            isCrit, isSupercrit, missed,
-            message: missed
-              ? `${targetMonster.name} はかわした！`
-              : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！` +
-                (isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''),
-          });
-
-          if (targetMonster.hp <= 0) {
+          if (restriction.selfAttack) {
+            const { damage } = calculateDamage(player, NORMAL_ATTACK, player, player.buffs || [], player.buffs || []);
+            player.hp = Math.max(0, player.hp - damage);
             actions.push({
-              actorType: 'system', actorId: null, actionType: 'defeated',
-              targetId: targetMonster.id,
+              actorType: 'player', actorId: player.id,
+              actionType: 'attack', targetId: player.id,
+              skillName: '通常攻撃（混乱）', specialSkill: false,
+              damage, heal: 0, statusEffect: null,
+              isCrit: false, isSupercrit: false, missed: false,
+              message: `${player.name} は混乱して自分を攻撃した！ ${damage} のダメージ！`,
+            });
+          } else if (!targetMonster) {
+            actions.push({
+              actorType: 'player', actorId: player.id,
+              actionType: 'skip', targetId: null,
+              skillName: null, specialSkill: false,
               damage: 0, heal: 0, statusEffect: null,
               isCrit: false, isSupercrit: false, missed: false,
-              message: `${targetMonster.name} を倒した！`,
+              message: '対象がいない！',
             });
+          } else {
+            player.mp = Math.max(0, player.mp - (Number(actualSkill.mp_cost) || 0));
+
+            if (actualSkill.effect_type === 'self_hp_cost') {
+              const selfCost = Math.floor(player.max_hp * ((Number(actualSkill.effect_value) || 0) / 100));
+              player.hp = Math.max(1, player.hp - selfCost);
+            }
+
+            if (actualSkill.skill_type === 'buff') {
+              player.buffs = applyBuff(
+                player.buffs || [],
+                actualSkill.effect_type,
+                Number(actualSkill.effect_value) || 0,
+                actualSkill.effect_duration || 1
+              );
+              actions.push({
+                actorType: 'player', actorId: player.id,
+                actionType: 'skill', targetId: player.id,
+                skillName: actualSkill.name,
+                specialSkill: !!actualSkill.is_special,
+                damage: 0, heal: 0, statusEffect: actualSkill.effect_type,
+                isCrit: false, isSupercrit: false, missed: false,
+                message: `${player.name} は ${actualSkill.name} を使った！`,
+              });
+            } else if (actualSkill.skill_type === 'heal' && actualSkill.effect_type === 'heal_max_hp_percent') {
+              const healAmount = Math.floor(player.max_hp * ((Number(actualSkill.effect_value) || 0) / 100));
+              player.hp = Math.min(player.max_hp, player.hp + healAmount);
+              actions.push({
+                actorType: 'player', actorId: player.id,
+                actionType: 'heal', targetId: player.id,
+                skillName: actualSkill.name,
+                specialSkill: !!actualSkill.is_special,
+                damage: 0, heal: healAmount, statusEffect: null,
+                isCrit: false, isSupercrit: false, missed: false,
+                message: `${player.name} は ${actualSkill.name} で ${healAmount} 回復した！`,
+              });
+            } else {
+              const { damage, isCrit, isSupercrit, missed } = calculateDamage(
+                player,
+                actualSkill,
+                targetMonster,
+                player.buffs || [],
+                targetMonster.buffs || []
+              );
+              if (!missed) targetMonster.hp = Math.max(0, targetMonster.hp - damage);
+
+              const statusEffect = !missed
+                ? applySkillEffect({ attacker: player, target: targetMonster, skill: actualSkill })
+                : null;
+
+              actions.push({
+                actorType: 'player', actorId: player.id,
+                actionType: playerAction.actionType, targetId: targetMonster.id,
+                skillName: actualSkill.name,
+                specialSkill: !!actualSkill.is_special,
+                damage, heal: 0, statusEffect,
+                isCrit, isSupercrit, missed,
+                message: actualSkill.is_special
+                  ? null
+                  : (missed
+                    ? `${targetMonster.name} はかわした！`
+                    : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
+              });
+
+              if (targetMonster.hp <= 0 && !targetMonster.escaped) {
+                actions.push({
+                  actorType: 'system', actorId: null, actionType: 'defeated',
+                  targetId: targetMonster.id,
+                  skillName: null, specialSkill: false,
+                  damage: 0, heal: 0, statusEffect: null,
+                  isCrit: false, isSupercrit: false, missed: false,
+                  message: `${targetMonster.name} を倒した！`,
+                });
+              }
+            }
           }
+        } else if (playerAction.actionType === 'capture') {
+          actions.push({
+            actorType: 'player', actorId: player.id,
+            actionType: 'capture', targetId: targetMonster ? targetMonster.id : null,
+            skillName: null, specialSkill: false,
+            damage: 0, heal: 0, statusEffect: null,
+            isCrit: false, isSupercrit: false, missed: false,
+            message: 'まだ仲間にする機能は未実装です...',
+          });
         }
-      } else if (playerAction.actionType === 'capture') {
-        // 仲間にする（今回はUIのみ）
-        actions.push({
-          actorType: 'player', actorId: player.id,
-          actionType: 'capture', targetId: targetMonster.id,
-          damage: 0, heal: 0, statusEffect: null,
-          isCrit: false, isSupercrit: false, missed: false,
-          message: 'まだ仲間にする機能は未実装です...',
-        });
       }
 
+      if (player.hp > 0) processEndOfTurn(player, 'player', actions);
+      if (player.hp <= 0) {
+        battleOver = true;
+        result = 'lose';
+        actions.push({
+          actorType: 'system', actorId: null, actionType: 'defeated',
+          targetId: player.id,
+          skillName: null, specialSkill: false,
+          damage: 0, heal: 0, statusEffect: null,
+          isCrit: false, isSupercrit: false, missed: false,
+          message: `${player.name} は倒れた...`,
+        });
+      }
     } else {
-      // モンスターターン
       const monster = participant.data;
-      if (monster.hp <= 0) continue;
+      if (monster.hp <= 0 || monster.escaped) continue;
+      monster.turnCount = (monster.turnCount || 0) + 1;
 
       const restriction = checkActionRestriction(monster);
       if (!restriction.canAct) {
         actions.push({
           actorType: 'monster', actorId: monster.id,
           actionType: 'skip', targetId: null,
+          skillName: null, specialSkill: false,
           damage: 0, heal: 0, statusEffect: null,
           isCrit: false, isSupercrit: false, missed: false,
           message: `${monster.name} は動けない！`,
         });
-        continue;
-      }
-
-      const skill = selectEnemyAction(monster);
-      monster.mp = Math.max(0, monster.mp - (skill.mp_cost || 0));
-
-      if (skill.skill_type === 'debuff') {
-        // デバフ攻撃
-        player.buffs = applyBuff(player.buffs || [], skill.effect_type, -(skill.effect_value || 0), 2);
-        actions.push({
-          actorType: 'monster', actorId: monster.id,
-          actionType: 'skill', targetId: player.id,
-          skillName: skill.name,
-          damage: 0, heal: 0, statusEffect: skill.effect_type,
-          isCrit: false, isSupercrit: false, missed: false,
-          message: `${monster.name} は ${skill.name} を使った！`,
-        });
       } else {
-        // 通常攻撃・物理スキル
-        const { damage, isCrit, isSupercrit, missed } = calculateDamage(
-          monster, skill, player, []
-        );
-        if (!missed) player.hp = Math.max(0, player.hp - damage);
+        const skill = selectEnemyAction(monster);
+        monster.mp = Math.max(0, monster.mp - (Number(skill.mp_cost) || 0));
 
-        actions.push({
-          actorType: 'monster', actorId: monster.id,
-          actionType: 'attack', targetId: player.id,
-          skillName: skill.name,
-          damage, heal: 0, statusEffect: null,
-          isCrit, isSupercrit, missed,
-          message: missed
-            ? `${player.name} はかわした！`
-            : `${monster.name} の ${skill.name}！ ${damage} のダメージ！` +
-              (isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''),
-        });
-
-        if (player.hp <= 0) {
-          battleOver = true;
-          result = 'lose';
+        if (skill.effect_type === 'escape') {
+          monster.escaped = true;
+          monster.hp = 0;
           actions.push({
-            actorType: 'system', actorId: null, actionType: 'defeated',
-            targetId: player.id,
+            actorType: 'monster', actorId: monster.id,
+            actionType: 'escape', targetId: null,
+            skillName: skill.name,
+            specialSkill: !!skill.is_special,
             damage: 0, heal: 0, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
-            message: `${player.name} は倒れた...`,
+            message: `${monster.name} は逃げ出した！`,
+          });
+        } else if (skill.skill_type === 'heal' && skill.effect_type === 'heal_max_hp_percent') {
+          const healAmount = Math.floor(monster.max_hp * ((Number(skill.effect_value) || 0) / 100));
+          monster.hp = Math.min(monster.max_hp, monster.hp + healAmount);
+          actions.push({
+            actorType: 'monster', actorId: monster.id,
+            actionType: 'heal', targetId: monster.id,
+            skillName: skill.name,
+            specialSkill: !!skill.is_special,
+            damage: 0, heal: healAmount, statusEffect: null,
+            isCrit: false, isSupercrit: false, missed: false,
+            message: `${monster.name} は ${skill.name} で ${healAmount} 回復した！`,
+          });
+        } else if (skill.skill_type === 'buff') {
+          monster.buffs = applyBuff(
+            monster.buffs || [],
+            skill.effect_type,
+            Number(skill.effect_value) || 0,
+            skill.effect_duration || 1
+          );
+          actions.push({
+            actorType: 'monster', actorId: monster.id,
+            actionType: 'skill', targetId: monster.id,
+            skillName: skill.name,
+            specialSkill: !!skill.is_special,
+            damage: 0, heal: 0, statusEffect: skill.effect_type,
+            isCrit: false, isSupercrit: false, missed: false,
+            message: `${monster.name} は ${skill.name} を使った！`,
+          });
+        } else {
+          const { damage, isCrit, isSupercrit, missed } = calculateDamage(
+            monster,
+            skill,
+            player,
+            monster.buffs || [],
+            player.buffs || []
+          );
+          if (!missed) player.hp = Math.max(0, player.hp - damage);
+
+          const statusEffect = !missed
+            ? applySkillEffect({ attacker: monster, target: player, skill })
+            : null;
+
+          actions.push({
+            actorType: 'monster', actorId: monster.id,
+            actionType: 'attack', targetId: player.id,
+            skillName: skill.name,
+            specialSkill: !!skill.is_special,
+            damage, heal: 0, statusEffect,
+            isCrit, isSupercrit, missed,
+            message: skill.is_special
+              ? null
+              : (missed
+                ? `${player.name} はかわした！`
+                : `${monster.name} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
+          });
+
+          if (player.hp <= 0) {
+            battleOver = true;
+            result = 'lose';
+            actions.push({
+              actorType: 'system', actorId: null, actionType: 'defeated',
+              targetId: player.id,
+              skillName: null, specialSkill: false,
+              damage: 0, heal: 0, statusEffect: null,
+              isCrit: false, isSupercrit: false, missed: false,
+              message: `${player.name} は倒れた...`,
+            });
+          }
+        }
+      }
+
+      if (!battleOver && monster.hp > 0 && !monster.escaped) {
+        processEndOfTurn(monster, 'monster', actions);
+      }
+
+      if (player.hp <= 0 && !battleOver) {
+        battleOver = true;
+        result = 'lose';
+      }
+    }
+
+    if (!battleOver) {
+      const endResult = resolveBattleEnd(monsters);
+      if (endResult) {
+        battleOver = true;
+        result = endResult;
+        if (endResult === 'enemy_escape') {
+          actions.push({
+            actorType: 'system', actorId: null, actionType: 'enemy_escape',
+            targetId: null,
+            skillName: null, specialSkill: false,
+            damage: 0, heal: 0, statusEffect: null,
+            isCrit: false, isSupercrit: false, missed: false,
+            message: '逃げられた',
           });
         }
       }
     }
-  }
-
-  // ターン終了処理: バフ・デバフ・状態異常のターン経過
-  player.buffs = tickBuffs(player.buffs || []);
-  for (const m of monsters) {
-    m.buffs = tickBuffs(m.buffs || []);
-  }
-
-  const playerStatusEvents = processStatusEffectTick(player);
-  for (const ev of playerStatusEvents) {
-    actions.push({
-      actorType: 'system', actorId: null, actionType: 'status_damage',
-      targetId: player.id, damage: ev.damage, heal: 0, statusEffect: ev.type,
-      isCrit: false, isSupercrit: false, missed: false,
-      message: `${player.name} は ${ev.type === 'poison' ? '毒' : 'やけど'} のダメージ ${ev.damage}！`,
-    });
-    if (player.hp <= 0 && !battleOver) {
-      battleOver = true;
-      result = 'lose';
-    }
-  }
-
-  for (const m of aliveMonsters) {
-    const events = processStatusEffectTick(m);
-    for (const ev of events) {
-      actions.push({
-        actorType: 'system', actorId: null, actionType: 'status_damage',
-        targetId: m.id, damage: ev.damage, heal: 0, statusEffect: ev.type,
-        isCrit: false, isSupercrit: false, missed: false,
-        message: `${m.name} は ${ev.type === 'poison' ? '毒' : 'やけど'} のダメージ ${ev.damage}！`,
-      });
-      if (m.hp <= 0) {
-        actions.push({
-          actorType: 'system', actorId: null, actionType: 'defeated',
-          targetId: m.id, damage: 0, heal: 0, statusEffect: null,
-          isCrit: false, isSupercrit: false, missed: false,
-          message: `${m.name} を倒した！`,
-        });
-      }
-    }
-  }
-
-  // 全モンスターが倒れたか確認
-  if (!battleOver && monsters.every((m) => m.hp <= 0)) {
-    battleOver = true;
-    result = 'win';
   }
 
   battleState.turn += 1;
@@ -432,9 +610,6 @@ function processTurn(battleState, playerAction) {
   };
 }
 
-/**
- * バトル状態のスナップショットを返す（送信用）
- */
 function getBattleState(battleState) {
   return {
     player: {
@@ -444,8 +619,16 @@ function getBattleState(battleState) {
       maxHp: battleState.player.max_hp,
       mp: battleState.player.mp,
       maxMp: battleState.player.max_mp,
-      buffs: battleState.player.buffs || [],
-      statusEffects: (battleState.player.statusEffects || []).map((e) => e.type),
+      buffs: (battleState.player.buffs || []).map((b) => ({
+        type: b.type,
+        value: Number(b.value) || 0,
+        turns: Number(b.turns) || 0,
+      })),
+      statusEffects: (battleState.player.statusEffects || []).map((e) => ({
+        type: e.type,
+        turns: Number(e.turns) || 0,
+        value: Number(e.value) || 0,
+      })),
     },
     monsters: battleState.monsters.map((m) => ({
       id: m.id,
@@ -454,27 +637,34 @@ function getBattleState(battleState) {
       maxHp: m.max_hp,
       mp: m.mp,
       maxMp: m.max_mp,
-      buffs: m.buffs || [],
-      statusEffects: (m.statusEffects || []).map((e) => e.type),
-      isAlive: m.hp > 0,
+      buffs: (m.buffs || []).map((b) => ({
+        type: b.type,
+        value: Number(b.value) || 0,
+        turns: Number(b.turns) || 0,
+      })),
+      statusEffects: (m.statusEffects || []).map((e) => ({
+        type: e.type,
+        turns: Number(e.turns) || 0,
+        value: Number(e.value) || 0,
+      })),
+      escaped: !!m.escaped,
+      isAlive: m.hp > 0 && !m.escaped,
     })),
   };
 }
 
-/**
- * 勝利時の経験値・お金を計算する
- * @param {Array} monsters - 倒したモンスター配列
- * @param {number} floor - ダンジョンフロア
- * @returns {{ exp: number, money: number }}
- */
 function calculateRewards(monsters, floor) {
   const floorMult = Math.pow(1.1, (floor || 1) - 1);
   let exp = 0;
   let money = 0;
-  for (const m of monsters) {
-    exp   += Math.floor((m.base_hp / 4 + m.base_attack / 2) * floorMult);
+
+  for (const m of monsters || []) {
+    if (m.escaped) continue;
+    if (m.hp > 0) continue;
+    exp += Math.floor((m.base_hp / 4 + m.base_attack / 2) * floorMult);
     money += Math.floor((m.base_hp / 8 + m.base_defense / 4) * floorMult);
   }
+
   return { exp, money };
 }
 

@@ -1,98 +1,70 @@
 // 状態異常処理モジュール
-// 毒・やけど・動けない・混乱・睡眠・麻痺・呪い の7種を管理する
 
-/**
- * 状態異常の種別定数
- */
 const STATUS_TYPES = {
-  POISON:    'poison',    // 毒
-  BURN:      'burn',      // やけど
-  STUN:      'stun',      // 動けない
-  CONFUSION: 'confusion', // 混乱
-  SLEEP:     'sleep',     // 睡眠
-  PARALYSIS: 'paralysis', // 麻痺
-  CURSE:     'curse',     // 呪い
+  POISON: 'poison',
+  BURN: 'burn',
+  STUN: 'stun',
+  CONFUSION: 'confusion',
+  SLEEP: 'sleep',
+  PARALYSIS: 'paralysis',
+  CURSE: 'curse',
 };
 
+function clampTurns(turns, fallback = 1) {
+  const n = Number(turns);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(fallback, Math.floor(n));
+}
+
+function clampPercent(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return n;
+}
+
 /**
- * 状態異常を付与する
- * @param {object} target - 付与対象の戦闘者オブジェクト（statusEffects 配列を持つ）
- * @param {string} effectType - STATUS_TYPES の値
- * @param {number} attackerAttack - 付与者の攻撃力（毒・やけど のダメージ計算用）
- * @returns {object} 付与された状態異常エントリ or null
+ * 状態異常を付与する（同種は上書き）
+ * @param {object} target
+ * @param {{type:string, turns?:number, value?:number, sourceAttack?:number}} config
+ * @returns {object|null}
  */
-function applyStatusEffect(target, effectType, attackerAttack) {
+function applyStatusEffect(target, config) {
+  if (!target || !config || !config.type) return null;
   if (!target.statusEffects) target.statusEffects = [];
 
-  switch (effectType) {
-    case STATUS_TYPES.POISON: {
-      // 同一キャラが再付与→ターン数3にリセット
-      // 別キャラ付与→新しい攻撃力参照で上書き、ターン3にリセット
-      const idx = target.statusEffects.findIndex((e) => e.type === STATUS_TYPES.POISON);
-      const entry = {
-        type: STATUS_TYPES.POISON,
-        turns: 3,
-        damagePerTurn: Math.floor(attackerAttack * 0.4),
-      };
-      if (idx >= 0) {
-        target.statusEffects[idx] = entry;
-      } else {
-        target.statusEffects.push(entry);
-      }
-      return entry;
-    }
+  const type = String(config.type);
+  const turns = clampTurns(config.turns, 1);
+  const value = clampPercent(config.value, 0);
+  const sourceAttack = Math.max(0, Number(config.sourceAttack) || 0);
 
-    case STATUS_TYPES.BURN: {
-      // 重ねがけ可能（攻撃力を上乗せ、ターン数は変わらず）
-      const existing = target.statusEffects.find((e) => e.type === STATUS_TYPES.BURN);
-      if (existing) {
-        existing.damagePerTurn += Math.floor(attackerAttack * 0.4);
-        return existing;
-      }
-      const entry = {
-        type: STATUS_TYPES.BURN,
-        turns: 3,
-        damagePerTurn: Math.floor(attackerAttack * 0.4),
-      };
-      target.statusEffects.push(entry);
-      return entry;
-    }
+  const entry = {
+    type,
+    turns,
+  };
 
-    case STATUS_TYPES.STUN:
-    case STATUS_TYPES.SLEEP:
-    case STATUS_TYPES.PARALYSIS:
-    case STATUS_TYPES.CURSE: {
-      // 重ねがけ無効
-      if (target.statusEffects.some((e) => e.type === effectType)) return null;
-      const entry = { type: effectType, turns: 1 };
-      target.statusEffects.push(entry);
-      return entry;
-    }
-
-    case STATUS_TYPES.CONFUSION: {
-      // 重ねがけ無効、2か3ターン（50%ずつ）
-      if (target.statusEffects.some((e) => e.type === STATUS_TYPES.CONFUSION)) return null;
-      const entry = {
-        type: STATUS_TYPES.CONFUSION,
-        turns: Math.random() < 0.5 ? 2 : 3,
-      };
-      target.statusEffects.push(entry);
-      return entry;
-    }
-
-    default:
-      return null;
+  if (type === STATUS_TYPES.POISON || type === STATUS_TYPES.BURN) {
+    entry.value = value;
+    entry.damagePerTurn = Math.max(1, Math.floor(sourceAttack * (value / 100)));
   }
+
+  const idx = target.statusEffects.findIndex((e) => e.type === type);
+  if (idx >= 0) {
+    target.statusEffects[idx] = entry;
+  } else {
+    target.statusEffects.push(entry);
+  }
+
+  return entry;
 }
 
 /**
  * ターン開始時に状態異常による行動制限を確認する
- * @param {object} combatant - 戦闘者
+ * @param {object} combatant
  * @returns {{ canAct: boolean, forceNormalAttack: boolean, selfAttack: boolean }}
  */
 function checkActionRestriction(combatant) {
   const result = { canAct: true, forceNormalAttack: false, selfAttack: false };
-  if (!combatant.statusEffects) return result;
+  if (!combatant || !Array.isArray(combatant.statusEffects)) return result;
 
   for (const e of combatant.statusEffects) {
     if ([STATUS_TYPES.STUN, STATUS_TYPES.SLEEP, STATUS_TYPES.PARALYSIS].includes(e.type)) {
@@ -100,37 +72,37 @@ function checkActionRestriction(combatant) {
       return result;
     }
     if (e.type === STATUS_TYPES.CONFUSION) {
-      if (Math.random() < 0.5) {
-        result.selfAttack = true; // 味方（自分）へのランダム通常攻撃
-      }
+      if (Math.random() < 0.5) result.selfAttack = true;
       return result;
     }
     if (e.type === STATUS_TYPES.CURSE) {
       result.forceNormalAttack = true;
     }
   }
+
   return result;
 }
 
 /**
  * ターン終了時に状態異常のダメージ処理とターン経過を行う
- * @param {object} combatant - 戦闘者
- * @returns {Array} 処理済みイベントログ
+ * @param {object} combatant
+ * @returns {Array<{type:string, damage:number, combatantId:any}>}
  */
 function processStatusEffectTick(combatant) {
-  if (!combatant.statusEffects || combatant.statusEffects.length === 0) return [];
+  if (!combatant || !Array.isArray(combatant.statusEffects) || combatant.statusEffects.length === 0) {
+    return [];
+  }
+
   const events = [];
 
   combatant.statusEffects = combatant.statusEffects.filter((e) => {
-    // ダメージ処理
-    if (e.type === STATUS_TYPES.POISON || e.type === STATUS_TYPES.BURN) {
-      const dmg = Math.max(1, e.damagePerTurn);
+    if ((e.type === STATUS_TYPES.POISON || e.type === STATUS_TYPES.BURN) && combatant.hp > 0) {
+      const dmg = Math.max(1, Number(e.damagePerTurn) || 1);
       combatant.hp = Math.max(0, combatant.hp - dmg);
       events.push({ type: e.type, damage: dmg, combatantId: combatant.id });
     }
 
-    // ターン数を減らし0以下なら除去
-    e.turns -= 1;
+    e.turns = clampTurns((e.turns || 1) - 1, 0);
     return e.turns > 0;
   });
 
