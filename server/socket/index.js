@@ -115,8 +115,9 @@ async function applyBattleRewards(userId, rewards) {
   } catch (err) {
     try {
       await client.query('ROLLBACK');
-    } catch (_rollbackError) {
-      // no-op
+    } catch (rollbackError) {
+      // eslint-disable-next-line no-console
+      console.error('[socket] 報酬更新ロールバックエラー:', rollbackError);
     }
     throw err;
   } finally {

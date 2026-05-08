@@ -10,6 +10,7 @@ ALTER TABLE job_skills
 UPDATE job_skills js
 SET required_level = jsl.required_level
 FROM job_skill_learns jsl
+-- job_skill_learns は 008_insert_beginner_job_skills.sql で作成済みを前提とする
 WHERE js.job_id = jsl.job_id
   AND js.skill_id = jsl.skill_id
   AND (js.required_level IS NULL OR js.required_level <> jsl.required_level);

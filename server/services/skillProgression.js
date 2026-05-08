@@ -5,6 +5,7 @@ function toInt(value, fallback = 0) {
 }
 
 function calcLevelFromExp(totalExp) {
+  // レベル式: 累計職業EXPを100ごとに1レベル上昇（例: 0-99=>Lv1, 100-199=>Lv2）
   const safeExp = Math.max(0, toInt(totalExp, 0));
   return Math.max(1, Math.floor(safeExp / 100) + 1);
 }
