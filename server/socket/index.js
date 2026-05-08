@@ -35,6 +35,7 @@ const BATTLE_END_DELAY = 300;
 const BEGINNER_MEADOW_ENCOUNTER_TOTAL = 5;
 const BEGINNER_MEADOW_BOSS_MONSTER_ID = 6;
 const BEGINNER_MEADOW_NORMAL_MONSTER_IDS = [1, 2, 3, 4, 5];
+let monsterInstanceCounter = 0;
 
 /**
  * キャラクターとスキルをDBから読み込む
@@ -158,8 +159,8 @@ function createMonsterInstance(baseMonster, floor, instanceSuffix) {
   if (!baseMonster) return null;
   const monster = JSON.parse(JSON.stringify(baseMonster));
   const mult = Math.pow(1.1, (floor || 1) - 1);
-  monster.id = `${baseMonster.id}:${instanceSuffix}`;
-  monster.monster_id = baseMonster.id;
+  // id はマスターモンスタIDを維持し、instance_id を戦闘中の個体識別子として使う
+  monster.instance_id = `${baseMonster.id}:${instanceSuffix}`;
   monster.hp = Math.ceil(monster.base_hp * mult);
   monster.max_hp = monster.hp;
   monster.mp = monster.base_max_mp;
@@ -183,6 +184,21 @@ function randomFrom(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function nextInstanceSuffix(prefix) {
+  monsterInstanceCounter += 1;
+  return `${prefix}-${monsterInstanceCounter}`;
+}
+
+function toLabelSuffix(index) {
+  let n = Math.max(0, Number(index) || 0);
+  let result = '';
+  do {
+    result = String.fromCharCode(97 + (n % 26)) + result;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return result;
+}
+
 async function pickMonster(dungeonId, floor, options = {}) {
   const isBeginnerMeadow = Number(dungeonId) === 1;
   const excludedMonsterIds = Array.isArray(options.excludedMonsterIds) ? options.excludedMonsterIds : [];
@@ -193,12 +209,12 @@ async function pickMonster(dungeonId, floor, options = {}) {
     const pickedMonsterId = randomFrom(candidates);
     if (!pickedMonsterId) return null;
     const baseMonster = await fetchMonsterWithSkills(pickedMonsterId);
-    return createMonsterInstance(baseMonster, floor, `single-${Date.now()}`);
+    return createMonsterInstance(baseMonster, floor, nextInstanceSuffix('single'));
   }
   const result = await db.query('SELECT id FROM monsters ORDER BY RANDOM() LIMIT 1');
   if (result.rowCount === 0) return null;
   const baseMonster = await fetchMonsterWithSkills(result.rows[0].id);
-  return createMonsterInstance(baseMonster, floor, `single-${Date.now()}`);
+  return createMonsterInstance(baseMonster, floor, nextInstanceSuffix('single'));
 }
 
 async function buildBeginnerMeadowEncounter(encounterIndex) {
@@ -219,7 +235,7 @@ async function buildBeginnerMeadowEncounter(encounterIndex) {
       fetchMonsterWithSkills(secondId),
     ]);
     return bases
-      .map((base, i) => createMonsterInstance(base, 1, `e${idx + 1}-${String.fromCharCode(97 + i)}`))
+      .map((base, i) => createMonsterInstance(base, 1, `e${idx + 1}-${toLabelSuffix(i)}`))
       .filter(Boolean);
   }
   const king = await fetchMonsterWithSkills(BEGINNER_MEADOW_BOSS_MONSTER_ID);
@@ -404,7 +420,8 @@ function registerSocketHandlers(io) {
 
       const playerAction = {
         actionType: payload.actionType || 'attack',
-        targetId: payload.targetId || (battleState.monsters[0] && battleState.monsters[0].id),
+        targetId: payload.targetId
+          || (battleState.monsters[0] && (battleState.monsters[0].instance_id || battleState.monsters[0].id)),
         skill,
       };
 

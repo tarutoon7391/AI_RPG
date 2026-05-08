@@ -228,6 +228,7 @@
   function migrateSaveData(raw) {
     const defaults = cloneDefaultSave();
     const src = getObject(raw);
+    const sourceVersion = Number(src.version) || 0;
     const uiSrc = getObject(src.ui);
     const progressSrc = getObject(src.progress);
     const battleSrc = getObject(src.battle);
@@ -314,6 +315,17 @@
     }
     if (!migrated.character.beginnerJobs.includes(migrated.character.selectedJobName)) {
       migrated.character.selectedJobName = defaults.character.selectedJobName;
+    }
+    if (sourceVersion < 4) {
+      if (!Number.isInteger(progressSrc.beginnerMeadowEncounterIndex)) {
+        migrated.progress.beginnerMeadowEncounterIndex = defaults.progress.beginnerMeadowEncounterIndex;
+      }
+      if (!Number.isInteger(progressSrc.beginnerMeadowEncounterTotal)) {
+        migrated.progress.beginnerMeadowEncounterTotal = defaults.progress.beginnerMeadowEncounterTotal;
+      }
+      if (typeof battleSrc.targetSelectionEnabled !== 'boolean') {
+        migrated.battle.targetSelectionEnabled = defaults.battle.targetSelectionEnabled;
+      }
     }
 
     return migrated;
@@ -916,6 +928,16 @@
     return (state.battleState?.monsters || []).filter((m) => m && m.isAlive);
   }
 
+  function toUpperAlphabetLabel(index) {
+    let n = Math.max(0, Number(index) || 0);
+    let result = '';
+    do {
+      result = String.fromCharCode(65 + (n % 26)) + result;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return result;
+  }
+
   function buildEnemyNameMap(monsters) {
     const grouped = {};
     (monsters || []).forEach((enemy) => {
@@ -930,7 +952,7 @@
         return;
       }
       list.forEach((enemy, idx) => {
-        nameMap.set(String(enemy.id), `${name}${String.fromCharCode(65 + idx)}`);
+        nameMap.set(String(enemy.id), `${name}${toUpperAlphabetLabel(idx)}`);
       });
     });
     return nameMap;
@@ -949,12 +971,12 @@
       if (!enemy) return;
       const item = document.createElement('div');
       item.className = `enemy-item${enemy.isAlive ? '' : ' defeated'}`;
-      const hp = `${enemy.hp ?? '---'}/${enemy.maxHp ?? '---'}`;
+      const hpText = `${enemy.hp ?? '---'}/${enemy.maxHp ?? '---'}`;
       const nameLine = document.createElement('div');
       nameLine.className = 'enemy-item-name';
       nameLine.textContent = getEnemyDisplayName(enemy, nameMap);
       const hpLine = document.createElement('div');
-      hpLine.textContent = `HP ${hp}`;
+      hpLine.textContent = `HP ${hpText}`;
       item.appendChild(nameLine);
       item.appendChild(hpLine);
       els.enemyList.appendChild(item);
@@ -1012,10 +1034,6 @@
     const aliveEnemies = getAliveEnemies();
     if (!aliveEnemies.length) {
       addBattleLog('対象となるモンスターがいません');
-      return;
-    }
-    if (!state.save.battle.targetSelectionEnabled || aliveEnemies.length === 1) {
-      emitBattleAction(actionType, skillId, aliveEnemies[0].id);
       return;
     }
     const nameMap = buildEnemyNameMap(state.battleState?.monsters || []);
