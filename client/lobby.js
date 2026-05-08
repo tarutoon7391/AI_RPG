@@ -853,6 +853,7 @@
       const item = document.createElement('span');
       item.className = 'status-icon';
       item.title = `${name}（残り${entry.turns}ターン）`;
+      item.setAttribute('aria-label', `${name} 残り${entry.turns}ターン`);
 
       const iconSpan = document.createElement('span');
       iconSpan.textContent = icon;

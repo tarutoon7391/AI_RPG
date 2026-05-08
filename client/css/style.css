@@ -351,6 +351,7 @@ button.secondary,
 .battle-log-special {
   color: #ff5d5d;
   font-weight: 700;
+  text-decoration: underline;
 }
 
 .battle-log {
