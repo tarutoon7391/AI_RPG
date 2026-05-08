@@ -13,7 +13,7 @@ const STATUS_TYPES = {
 function normalizeTurns(turns, fallback = 1) {
   const n = Number(turns);
   if (!Number.isFinite(n)) return fallback;
-  return Math.max(fallback, Math.floor(n));
+  return Math.max(0, Math.floor(n));
 }
 
 function normalizePercent(value, fallback = 0) {
@@ -33,7 +33,7 @@ function applyStatusEffect(target, config) {
   if (!target.statusEffects) target.statusEffects = [];
 
   const type = String(config.type);
-  const turns = normalizeTurns(config.turns, 1);
+  const turns = Math.max(1, normalizeTurns(config.turns, 1));
   const value = normalizePercent(config.value, 0);
   const sourceAttack = Math.max(0, Number(config.sourceAttack) || 0);
 

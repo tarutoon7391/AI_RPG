@@ -179,6 +179,7 @@ function tickBuffs(buffs) {
 }
 
 function checkEffectChance(skill) {
+  // effect_chance が未設定の場合は 100% 扱い（既存スキル互換）
   const rawChance = Number(skill?.effect_chance);
   const chance = Number.isFinite(rawChance) ? rawChance : 100;
   return Math.random() * 100 < Math.max(0, Math.min(100, chance));
