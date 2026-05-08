@@ -4,6 +4,7 @@
     authPass: document.getElementById('auth-password'),
     authError: document.getElementById('auth-error'),
     loginBtn: document.getElementById('login-btn'),
+    registerBtn: document.getElementById('register-btn'),
   };
 
   async function checkSessionAndRedirect() {
@@ -49,6 +50,11 @@
 
   function bindEvents() {
     els.loginBtn.addEventListener('click', login);
+    if (els.registerBtn) {
+      els.registerBtn.addEventListener('click', () => {
+        location.href = '/register.html';
+      });
+    }
   }
 
   async function init() {

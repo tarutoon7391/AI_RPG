@@ -175,6 +175,45 @@ input {
   color: #ffd24a;
 }
 
+.job-popup-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.mini-popup .job-popup-tab-btn {
+  text-align: center;
+  padding: 6px;
+  font-size: 11px;
+}
+
+.job-popup-list {
+  display: grid;
+  gap: 4px;
+}
+
+.mini-popup .job-popup-job-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-popup .job-popup-job-btn .job-name {
+  font-size: 12px;
+}
+
+.mini-popup .job-popup-job-btn .job-level {
+  font-size: 11px;
+  color: #9fc1e3;
+}
+
+.mini-popup .job-popup-job-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 button {
   border: none;
   border-radius: 8px;
