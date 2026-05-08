@@ -399,7 +399,7 @@ function processTurn(battleState, playerAction) {
                 });
               } else {
                 let statusEffect = null;
-                if (actualSkill.effect_type && (actualSkill.effect_type.endsWith('_up') || actualSkill.effect_type.endsWith('_down'))) {
+                if (actualSkill.skill_type === 'buff' || actualSkill.skill_type === 'debuff') {
                   target.buffs = applyBuff(
                     target.buffs || [],
                     actualSkill.effect_type,
