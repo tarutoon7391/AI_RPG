@@ -1,10 +1,12 @@
 (function () {
   const SAVE_KEY = 'ai_rpg_save';
+  const DEFAULT_JOB_LEVEL = 1;
+  const LOCKED_JOB_LEVEL_DISPLAY = 'Lv-';
   const BEGINNER_JOB_OPTIONS = ['戦士', '魔法使い', '僧侶', '盗賊', '狩人', '格闘家', 'まものつかい'];
   const ADVANCED_JOB_OPTIONS = ['未実装'];
   const SPECIAL_JOB_OPTIONS = ['未実装'];
   const JOB_TAB_DEFINITIONS = [
-    { key: 'beginner', label: '基本職', jobs: BEGINNER_JOB_OPTIONS, selectable: true, unlockMessage: '' },
+    { key: 'beginner', label: '基本職', jobs: BEGINNER_JOB_OPTIONS, selectable: true },
     {
       key: 'advanced',
       label: '上級職',
@@ -60,6 +62,7 @@
   const DEFAULT_CHARACTER_UI = {
     selectedJobName: '戦士',
     beginnerJobs: BEGINNER_JOB_OPTIONS,
+    jobLevels: {},
     equipment: DEFAULT_EQUIPPED,
     equipmentInventory: DEFAULT_EQUIP_INVENTORY,
   };
@@ -303,6 +306,7 @@
           defaults.character.selectedJobName
         ),
         beginnerJobs: sanitizeBeginnerJobs(characterSrc.beginnerJobs, defaults.character.beginnerJobs),
+        jobLevels: getObject(characterSrc.jobLevels),
         equipment: {
           head: typeof equipmentSrc.head === 'string'
             ? equipmentSrc.head
@@ -580,11 +584,14 @@
 
   function getJobLevelByName(jobName) {
     const char = state.characterData || {};
-    const jobLevels = getObject(char.job_levels);
+    const jobLevels = {
+      ...getObject(state.save?.character?.jobLevels),
+      ...getObject(char.job_levels),
+    };
     const levelFromMap = toInt(jobLevels[jobName], 0);
     if (levelFromMap > 0) return levelFromMap;
-    if (char.job_name === jobName) return toInt(char.job_level, 1);
-    return 1;
+    if (char.job_name === jobName) return toInt(char.job_level, DEFAULT_JOB_LEVEL);
+    return DEFAULT_JOB_LEVEL;
   }
 
   function renderJobPopup() {
@@ -615,13 +622,13 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'job-popup-job-btn';
-      const level = getJobLevelByName(jobName);
+      const level = tab.selectable ? getJobLevelByName(jobName) : null;
       const nameEl = document.createElement('span');
       nameEl.className = 'job-name';
       nameEl.textContent = jobName;
       const levelEl = document.createElement('span');
       levelEl.className = 'job-level';
-      levelEl.textContent = tab.selectable ? `Lv${level}` : 'Lv-';
+      levelEl.textContent = tab.selectable ? `Lv${level}` : LOCKED_JOB_LEVEL_DISPLAY;
       btn.appendChild(nameEl);
       btn.appendChild(levelEl);
       btn.classList.toggle('active', tab.selectable && jobName === current);
@@ -1253,13 +1260,20 @@
       const character = profile.character;
       state.characterData = character;
       state.playerSkills = profile.skills;
+      let shouldPersist = false;
+      const incomingJobLevels = getObject(character.job_levels);
+      if (Object.keys(incomingJobLevels).length) {
+        state.save.character.jobLevels = incomingJobLevels;
+        shouldPersist = true;
+      }
       if (character.job_name && typeof character.job_name === 'string') {
         const incomingJobName = character.job_name.trim();
         if (state.save.character.beginnerJobs.includes(incomingJobName)) {
           state.save.character.selectedJobName = incomingJobName;
+          shouldPersist = true;
         }
-        persistSave();
       }
+      if (shouldPersist) persistSave();
       const displayName = character.name || state.user?.name || state.user?.username;
       if (displayName) {
         els.statusText.textContent = `ログイン状態: ${displayName} でログイン中`;

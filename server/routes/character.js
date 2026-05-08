@@ -12,6 +12,7 @@ const {
 } = require('../services/skillProgression');
 
 const router = express.Router();
+const DEFAULT_JOB_LEVEL = 1;
 const characterJobRateLimit = createRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 30,
@@ -35,7 +36,7 @@ async function fetchJobLevelsByCharacterId(characterId) {
   return result.rows.reduce((acc, row) => {
     if (!row || typeof row.job_name !== 'string') return acc;
     const level = Number(row.job_level);
-    acc[row.job_name] = Number.isFinite(level) && level > 0 ? Math.round(level) : 1;
+    acc[row.job_name] = Number.isFinite(level) && level >= 0 ? Math.round(level) : DEFAULT_JOB_LEVEL;
     return acc;
   }, {});
 }
