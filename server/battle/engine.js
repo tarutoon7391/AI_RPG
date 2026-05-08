@@ -378,22 +378,48 @@ function processTurn(battleState, playerAction) {
               player.hp = Math.max(1, player.hp - selfCost);
             }
 
-            if (actualSkill.skill_type === 'buff') {
-              player.buffs = applyBuff(
-                player.buffs || [],
-                actualSkill.effect_type,
-                Number(actualSkill.effect_value) || 0,
-                actualSkill.effect_duration || 1
-              );
-              actions.push({
-                actorType: 'player', actorId: player.id,
-                actionType: 'skill', targetId: player.id,
-                skillName: actualSkill.name,
-                specialSkill: !!actualSkill.is_special,
-                damage: 0, heal: 0, statusEffect: actualSkill.effect_type,
-                isCrit: false, isSupercrit: false, missed: false,
-                message: `${player.name} は ${actualSkill.name} を使った！`,
-              });
+            if (
+              (actualSkill.skill_type === 'buff'
+                || actualSkill.skill_type === 'debuff'
+                || actualSkill.skill_type === 'status')
+              && (Number(actualSkill.power) || 0) <= 0
+            ) {
+              const target = actualSkill.target === 'self' ? player : targetMonster;
+              const targetId = target
+                ? (target === player ? player.id : (target.instance_id || target.id))
+                : null;
+              if (!target) {
+                actions.push({
+                  actorType: 'player', actorId: player.id,
+                  actionType: 'skip', targetId: null,
+                  skillName: null, specialSkill: false,
+                  damage: 0, heal: 0, statusEffect: null,
+                  isCrit: false, isSupercrit: false, missed: false,
+                  message: '対象がいない！',
+                });
+              } else {
+                let statusEffect = null;
+                if (actualSkill.effect_type && (actualSkill.effect_type.endsWith('_up') || actualSkill.effect_type.endsWith('_down'))) {
+                  target.buffs = applyBuff(
+                    target.buffs || [],
+                    actualSkill.effect_type,
+                    Number(actualSkill.effect_value) || 0,
+                    actualSkill.effect_duration || 1
+                  );
+                  statusEffect = actualSkill.effect_type;
+                } else {
+                  statusEffect = applySkillEffect({ attacker: player, target, skill: actualSkill });
+                }
+                actions.push({
+                  actorType: 'player', actorId: player.id,
+                  actionType: 'skill', targetId,
+                  skillName: actualSkill.name,
+                  specialSkill: !!actualSkill.is_special,
+                  damage: 0, heal: 0, statusEffect,
+                  isCrit: false, isSupercrit: false, missed: false,
+                  message: `${player.name} は ${actualSkill.name} を使った！`,
+                });
+              }
             } else if (actualSkill.skill_type === 'heal' && actualSkill.effect_type === 'heal_max_hp_percent') {
               const healAmount = Math.floor(player.max_hp * ((Number(actualSkill.effect_value) || 0) / 100));
               player.hp = Math.min(player.max_hp, player.hp + healAmount);

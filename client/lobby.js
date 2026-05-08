@@ -123,6 +123,7 @@
     turnSequence: Promise.resolve(),
     pendingBattleEnd: false,
     pendingAction: null,
+    battleSessionId: 0,
   };
 
   const els = {
@@ -730,28 +731,36 @@
     state.socket = io({ withCredentials: true });
 
     state.socket.on('battle:start', (data) => {
-      state.battleState = data.state || null;
-      state.playerSkills = data.playerSkills || [];
-      state.waitingAction = true;
-      state.pendingBattleEnd = false;
-      state.turnSequence = Promise.resolve();
-      if (state.battleState && Number(state.battleState.dungeonId) === 1) {
-        state.save.progress.beginnerMeadowEncounterIndex = toInt(state.battleState.encounterIndex, 0);
-        state.save.progress.beginnerMeadowEncounterTotal = toInt(state.battleState.encounterTotal, 5);
-        persistSave();
-      }
-      updateBattleState();
-      setCommandEnabled(true);
-      addBattleLog(data.message || 'バトル開始');
-      setBattleVisible(true);
+      const nextSessionId = state.battleSessionId + 1;
+      state.battleSessionId = nextSessionId;
+      closeMiniPopup();
+      hideSkillModal();
+      state.turnSequence = Promise.resolve().then(() => {
+        if (nextSessionId !== state.battleSessionId) return;
+        state.battleState = data.state || null;
+        state.playerSkills = data.playerSkills || [];
+        state.waitingAction = true;
+        state.pendingBattleEnd = false;
+        if (state.battleState && Number(state.battleState.dungeonId) === 1) {
+          state.save.progress.beginnerMeadowEncounterIndex = toInt(state.battleState.encounterIndex, 0);
+          state.save.progress.beginnerMeadowEncounterTotal = toInt(state.battleState.encounterTotal, 5);
+          persistSave();
+        }
+        updateBattleState();
+        setCommandEnabled(true);
+        addBattleLog(data.message || 'バトル開始');
+        setBattleVisible(true);
+      });
     });
 
     state.socket.on('battle:turn', (data) => {
-      state.turnSequence = state.turnSequence.then(() => processBattleTurn(data));
+      const sessionId = state.battleSessionId;
+      state.turnSequence = state.turnSequence.then(() => processBattleTurn(data, sessionId));
     });
 
     state.socket.on('battle:end', (data) => {
-      state.turnSequence = state.turnSequence.then(() => processBattleEnd(data));
+      const sessionId = state.battleSessionId;
+      state.turnSequence = state.turnSequence.then(() => processBattleEnd(data, sessionId));
     });
 
     state.socket.on('battle:error', (data) => {
@@ -773,6 +782,7 @@
     state.playerSkills = [];
     state.waitingAction = false;
     state.characterData = null;
+    state.battleSessionId = 0;
     closeMiniPopup();
     disconnectSocket();
     setBattleVisible(false);
@@ -869,7 +879,8 @@
     return playerAlive && hasAliveEnemy;
   }
 
-  async function processBattleTurn(data) {
+  async function processBattleTurn(data, sessionId) {
+    if (sessionId !== state.battleSessionId) return;
     state.pendingBattleEnd = false;
     const nextState = data.state || null;
     const visualState = cloneBattleState(state.battleState) || cloneBattleState(nextState);
@@ -882,6 +893,7 @@
     let enemyTurnShown = false;
 
     for (const action of actions) {
+      if (sessionId !== state.battleSessionId) return;
       if (action.actorType === 'monster' && !enemyTurnShown) {
         addBattleLog('敵のターン');
         enemyTurnShown = true;
@@ -902,6 +914,7 @@
       await wait(700);
     }
 
+    if (sessionId !== state.battleSessionId) return;
     state.battleState = nextState;
     updateBattleState();
 
@@ -911,7 +924,8 @@
     setCommandEnabled(true);
   }
 
-  async function processBattleEnd(data) {
+  async function processBattleEnd(data, sessionId) {
+    if (sessionId !== state.battleSessionId) return;
     state.pendingBattleEnd = true;
     state.waitingAction = false;
     setCommandEnabled(false);

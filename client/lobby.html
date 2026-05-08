@@ -105,16 +105,21 @@
             <div class="enemy-visual" id="enemy-visual">ENEMY</div>
             <div id="enemy-list" class="enemy-list"></div>
             <div class="bar-wrap">
-              <div class="bar-label" id="enemy-hp-text">HP ---/---</div>
+              <div class="bar-label bar-label-with-icons">
+                <span id="enemy-hp-text">HP ---/---</span>
+                <div id="enemy-effects" class="status-icons hp-status-icons"></div>
+              </div>
               <div class="bar-bg"><div id="enemy-hp-bar" class="bar hp"></div></div>
             </div>
-            <div id="enemy-effects" class="status-icons"></div>
           </div>
 
           <div class="player-area">
-            <div class="player-name-row"><div id="player-name">---</div><div id="player-effects" class="status-icons"></div></div>
+            <div class="player-name-row"><div id="player-name">---</div></div>
             <div class="bar-wrap">
-              <div class="bar-label" id="player-hp-text">HP ---/---</div>
+              <div class="bar-label bar-label-with-icons">
+                <span id="player-hp-text">HP ---/---</span>
+                <div id="player-effects" class="status-icons hp-status-icons"></div>
+              </div>
               <div class="bar-bg"><div id="player-hp-bar" class="bar hp"></div></div>
             </div>
             <div class="bar-wrap">
