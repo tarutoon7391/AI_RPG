@@ -10,10 +10,14 @@ const STATUS_TYPES = {
   CURSE: 'curse',
 };
 
-function normalizeTurns(turns, fallback = 1) {
+function normalizeDuration(turns, fallback = 1) {
   const n = Number(turns);
   if (!Number.isFinite(n)) return fallback;
-  return Math.max(0, Math.floor(n));
+  return Math.max(1, Math.floor(n));
+}
+
+function decrementTurns(turns) {
+  return Math.max(0, Math.floor(Number(turns) || 0) - 1);
 }
 
 function normalizePercent(value, fallback = 0) {
@@ -33,7 +37,7 @@ function applyStatusEffect(target, config) {
   if (!target.statusEffects) target.statusEffects = [];
 
   const type = String(config.type);
-  const turns = Math.max(1, normalizeTurns(config.turns, 1));
+  const turns = normalizeDuration(config.turns, 1);
   const value = normalizePercent(config.value, 0);
   const sourceAttack = Math.max(0, Number(config.sourceAttack) || 0);
 
@@ -102,7 +106,7 @@ function processStatusEffectTick(combatant) {
       events.push({ type: e.type, damage: dmg, combatantId: combatant.id });
     }
 
-    e.turns = normalizeTurns((e.turns || 1) - 1, 0);
+    e.turns = decrementTurns(e.turns || 1);
     return e.turns > 0;
   });
 

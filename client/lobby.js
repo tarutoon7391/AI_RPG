@@ -867,8 +867,13 @@
     });
   }
 
+  function hasStatusEffect(entity, statusType) {
+    return Array.isArray(entity?.statusEffects)
+      && entity.statusEffects.some((e) => e && e.type === statusType);
+  }
+
   function hasPoison(entity) {
-    return Array.isArray(entity?.statusEffects) && entity.statusEffects.some((e) => e && e.type === 'poison');
+    return hasStatusEffect(entity, 'poison');
   }
 
   function ratio(value, max) {
