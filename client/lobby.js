@@ -47,6 +47,22 @@
   const POPUP_HEIGHT_BUFFER = 200;
   const POPUP_WIDTH_BUFFER = 270;
   const POPUP_MIN_MARGIN = 8;
+  const EFFECT_ICON_MAP = {
+    poison: '🟣',
+    speed_up: '⚡',
+    speed_down: '⚡',
+    defense_up: '🛡️',
+    attack_up: '⚔️',
+    sleep: '💤',
+  };
+  const EFFECT_NAME_MAP = {
+    poison: '毒',
+    speed_up: '素早さアップ',
+    speed_down: '素早さダウン',
+    defense_up: '防御アップ',
+    attack_up: '攻撃アップ',
+    sleep: '眠り',
+  };
 
   const defaultSave = {
     version: 3,
@@ -143,7 +159,9 @@
     enemyVisual: document.getElementById('enemy-visual'),
     enemyHpText: document.getElementById('enemy-hp-text'),
     enemyHpBar: document.getElementById('enemy-hp-bar'),
+    enemyEffects: document.getElementById('enemy-effects'),
     playerName: document.getElementById('player-name'),
+    playerEffects: document.getElementById('player-effects'),
     playerHpText: document.getElementById('player-hp-text'),
     playerHpBar: document.getElementById('player-hp-bar'),
     playerMpText: document.getElementById('player-mp-text'),
@@ -645,9 +663,10 @@
     setCommandEnabled(false);
   }
 
-  function addBattleLog(message) {
+  function addBattleLog(message, options = {}) {
     const line = document.createElement('div');
     line.textContent = message;
+    if (options.className) line.classList.add(options.className);
     els.battleLog.appendChild(line);
     if (state.save.battle.autoScrollLog) {
       els.battleLog.scrollTop = els.battleLog.scrollHeight;
@@ -681,15 +700,16 @@
         playShake([els.playerHpText], 'shake-target'),
         playShake([els.app], 'shake-screen'),
       ]);
+      return;
     }
-  }
-
-  function splitTurnActions(actions) {
-    const queue = Array.isArray(actions) ? actions.filter(Boolean) : [];
-    const playerAction = queue.find((x) => x.actorType === 'player') || null;
-    const enemyAction = queue.find((x) => x.actorType === 'monster') || null;
-    const extras = queue.filter((x) => x !== playerAction && x !== enemyAction);
-    return { playerAction, enemyAction, extras };
+    if (action.actionType === 'status_damage') {
+      const isPlayer = String(action.targetId) === String(state.battleState?.player?.id);
+      if (isPlayer) {
+        await playShake([els.playerHpText], 'shake-target');
+      } else {
+        await playShake([els.enemyVisual, els.enemyHpText], 'shake-target');
+      }
+    }
   }
 
   function cloneBattleState(battle) {
@@ -701,11 +721,15 @@
   }
 
   function applyActionToBattleState(battle, action) {
-    if (!battle || !action || action.missed || !action.damage || action.damage <= 0) return;
-    if (action.targetId == null) return;
+    if (!battle || !action || action.targetId == null) return;
 
-    if (String(action.targetId) === String(battle.player?.id)) {
-      battle.player.hp = Math.max(0, (battle.player.hp || 0) - action.damage);
+    const isPlayer = String(action.targetId) === String(battle.player?.id);
+    if (isPlayer) {
+      if (action.heal && action.heal > 0) {
+        battle.player.hp = Math.min(battle.player.maxHp || battle.player.hp || 0, (battle.player.hp || 0) + action.heal);
+      } else if (!action.missed && action.damage && action.damage > 0) {
+        battle.player.hp = Math.max(0, (battle.player.hp || 0) - action.damage);
+      }
       return;
     }
 
@@ -713,8 +737,12 @@
       (m) => m && String(m.id) === String(action.targetId)
     );
     if (!targetMonster) return;
-    targetMonster.hp = Math.max(0, (targetMonster.hp || 0) - action.damage);
-    targetMonster.isAlive = targetMonster.hp > 0;
+    if (action.heal && action.heal > 0) {
+      targetMonster.hp = Math.min(targetMonster.maxHp || targetMonster.hp || 0, (targetMonster.hp || 0) + action.heal);
+    } else if (!action.missed && action.damage && action.damage > 0) {
+      targetMonster.hp = Math.max(0, (targetMonster.hp || 0) - action.damage);
+    }
+    targetMonster.isAlive = !targetMonster.escaped && targetMonster.hp > 0;
   }
 
   function isBattleContinuable() {
@@ -734,44 +762,29 @@
     state.waitingAction = false;
     setCommandEnabled(false);
 
-    const { playerAction, enemyAction, extras } = splitTurnActions(data.actions);
+    const actions = Array.isArray(data.actions) ? data.actions.filter(Boolean) : [];
+    let enemyTurnShown = false;
 
-    if (playerAction?.actionType === 'escape' && playerAction.message === '逃げ切った！') {
-      addBattleLog(playerAction.message);
-      state.battleState = nextState;
-      updateBattleState();
-      return;
-    }
+    for (const action of actions) {
+      if (action.actorType === 'monster' && !enemyTurnShown) {
+        addBattleLog('敵のターン');
+        enemyTurnShown = true;
+        await wait(600);
+      }
 
-    if (playerAction?.message) addBattleLog(playerAction.message);
-    await wait(1000);
-    applyActionToBattleState(visualState, playerAction);
-    state.battleState = visualState;
-    updateBattleState();
-    await playDamageEffect(playerAction);
-    await wait(1000);
+      if (action.specialSkill && action.skillName) {
+        addBattleLog(action.skillName, { className: 'battle-log-special' });
+      } else if (action.message) {
+        addBattleLog(action.message);
+      }
 
-    let canContinue = isBattleContinuable();
-    if (canContinue) {
-      addBattleLog('敵のターン');
-      await wait(1000);
-    }
-
-    canContinue = isBattleContinuable();
-    if (enemyAction && canContinue) {
-      if (enemyAction.message) addBattleLog(enemyAction.message);
-      await wait(1000);
-      applyActionToBattleState(visualState, enemyAction);
+      applyActionToBattleState(visualState, action);
       state.battleState = visualState;
       updateBattleState();
-      await playDamageEffect(enemyAction);
-      await wait(1000);
-    }
 
-    extras.forEach((x) => {
-      if (x.message) addBattleLog(x.message);
-      applyActionToBattleState(visualState, x);
-    });
+      await playDamageEffect(action);
+      await wait(700);
+    }
 
     state.battleState = nextState;
     updateBattleState();
@@ -810,6 +823,59 @@
     addBattleLog('「冒険へ戻る」を押すとダンジョン一覧に戻ります。');
   }
 
+
+  function buildEffectEntries(entity) {
+    const entries = [];
+    const buffs = Array.isArray(entity?.buffs) ? entity.buffs : [];
+    const statuses = Array.isArray(entity?.statusEffects) ? entity.statusEffects : [];
+
+    buffs.forEach((b) => {
+      if (!b || !b.type) return;
+      entries.push({ type: b.type, turns: b.turns || 0 });
+    });
+
+    statuses.forEach((e) => {
+      if (!e || !e.type) return;
+      entries.push({ type: e.type, turns: e.turns || 0 });
+    });
+
+    return entries;
+  }
+
+  function renderStatusIcons(container, entity) {
+    if (!container) return;
+    container.textContent = '';
+    const entries = buildEffectEntries(entity);
+    entries.forEach((entry) => {
+      const icon = EFFECT_ICON_MAP[entry.type];
+      if (!icon) return;
+      const name = EFFECT_NAME_MAP[entry.type] || entry.type;
+      const item = document.createElement('span');
+      item.className = 'status-icon';
+      item.title = `${name}（残り${entry.turns}ターン）`;
+      item.setAttribute('aria-label', `${name} 残り${entry.turns}ターン`);
+
+      const iconSpan = document.createElement('span');
+      iconSpan.textContent = icon;
+      const turnSpan = document.createElement('span');
+      turnSpan.className = 'status-turn';
+      turnSpan.textContent = String(entry.turns);
+
+      item.appendChild(iconSpan);
+      item.appendChild(turnSpan);
+      container.appendChild(item);
+    });
+  }
+
+  function hasStatusEffect(entity, statusType) {
+    return Array.isArray(entity?.statusEffects)
+      && entity.statusEffects.some((e) => e && e.type === statusType);
+  }
+
+  function hasPoison(entity) {
+    return hasStatusEffect(entity, 'poison');
+  }
+
   function ratio(value, max) {
     if (!max || max <= 0) return 0;
     return Math.max(0, Math.min(1, value / max));
@@ -829,13 +895,17 @@
     els.enemyName.textContent = enemy.name || '---';
     els.enemyHpText.textContent = `HP ${enemy.hp ?? '---'}/${enemy.maxHp ?? '---'}`;
     updateBar(els.enemyHpBar, enemy.hp || 0, enemy.maxHp || 1);
+    els.enemyHpBar.classList.toggle('poisoned', hasPoison(enemy));
+    renderStatusIcons(els.enemyEffects, enemy);
 
     els.playerName.textContent = player.name || '---';
     els.playerHpText.textContent = `HP ${player.hp ?? '---'}/${player.maxHp ?? '---'}`;
     updateBar(els.playerHpBar, player.hp || 0, player.maxHp || 1);
+    els.playerHpBar.classList.toggle('poisoned', hasPoison(player));
 
     els.playerMpText.textContent = `MP ${player.mp ?? '---'}/${player.maxMp ?? '---'}`;
     updateBar(els.playerMpBar, player.mp || 0, player.maxMp || 1);
+    renderStatusIcons(els.playerEffects, player);
   }
 
   function setCommandEnabled(enabled) {

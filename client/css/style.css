@@ -316,6 +316,44 @@ button.secondary,
   font-weight: 700;
 }
 
+
+.player-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  min-height: 18px;
+}
+
+.status-icon {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.status-turn {
+  font-size: 10px;
+  color: #b8c9db;
+}
+
+.bar.hp.poisoned {
+  background: #9c4dcc;
+}
+
+.battle-log-special {
+  color: #ff5d5d;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
 .battle-log {
   margin-top: 10px;
   background: #111b29;
