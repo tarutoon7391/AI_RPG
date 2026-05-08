@@ -65,7 +65,7 @@
   };
 
   const defaultSave = {
-    version: 3,
+    version: 4,
     ui: {
       activeTab: 'adventure',
       lastScreen: 'dungeonList',
@@ -74,10 +74,13 @@
       lastDungeonId: 1,
       lastDungeonName: 'はじまりの草原',
       lastFloor: 1,
+      beginnerMeadowEncounterIndex: 0,
+      beginnerMeadowEncounterTotal: 5,
     },
     battle: {
       autoScrollLog: true,
       preferredCommand: 'attack',
+      targetSelectionEnabled: true,
     },
     character: DEFAULT_CHARACTER_UI,
   };
@@ -96,6 +99,7 @@
     },
     turnSequence: Promise.resolve(),
     pendingBattleEnd: false,
+    pendingAction: null,
   };
 
   const els = {
@@ -157,6 +161,7 @@
     skillCancel: document.getElementById('skill-cancel'),
     enemyName: document.getElementById('enemy-name'),
     enemyVisual: document.getElementById('enemy-visual'),
+    enemyList: document.getElementById('enemy-list'),
     enemyHpText: document.getElementById('enemy-hp-text'),
     enemyHpBar: document.getElementById('enemy-hp-bar'),
     enemyEffects: document.getElementById('enemy-effects'),
@@ -223,6 +228,7 @@
   function migrateSaveData(raw) {
     const defaults = cloneDefaultSave();
     const src = getObject(raw);
+    const sourceVersion = Number(src.version) || 0;
     const uiSrc = getObject(src.ui);
     const progressSrc = getObject(src.progress);
     const battleSrc = getObject(src.battle);
@@ -251,6 +257,12 @@
         lastFloor: Number.isInteger(progressSrc.lastFloor)
           ? progressSrc.lastFloor
           : (Number.isInteger(src.floor) ? src.floor : defaults.progress.lastFloor),
+        beginnerMeadowEncounterIndex: Number.isInteger(progressSrc.beginnerMeadowEncounterIndex)
+          ? progressSrc.beginnerMeadowEncounterIndex
+          : defaults.progress.beginnerMeadowEncounterIndex,
+        beginnerMeadowEncounterTotal: Number.isInteger(progressSrc.beginnerMeadowEncounterTotal)
+          ? progressSrc.beginnerMeadowEncounterTotal
+          : defaults.progress.beginnerMeadowEncounterTotal,
       },
       battle: {
         autoScrollLog: typeof battleSrc.autoScrollLog === 'boolean'
@@ -259,6 +271,9 @@
         preferredCommand: typeof battleSrc.preferredCommand === 'string'
           ? battleSrc.preferredCommand
           : defaults.battle.preferredCommand,
+        targetSelectionEnabled: typeof battleSrc.targetSelectionEnabled === 'boolean'
+          ? battleSrc.targetSelectionEnabled
+          : defaults.battle.targetSelectionEnabled,
       },
       character: {
         selectedJobName: firstString(
@@ -292,8 +307,25 @@
     if (!tabs.includes(migrated.ui.activeTab)) migrated.ui.activeTab = defaults.ui.activeTab;
     if (migrated.progress.lastDungeonId < 1) migrated.progress.lastDungeonId = defaults.progress.lastDungeonId;
     if (migrated.progress.lastFloor < 1) migrated.progress.lastFloor = defaults.progress.lastFloor;
+    if (migrated.progress.beginnerMeadowEncounterIndex < 0) {
+      migrated.progress.beginnerMeadowEncounterIndex = defaults.progress.beginnerMeadowEncounterIndex;
+    }
+    if (migrated.progress.beginnerMeadowEncounterTotal < 1) {
+      migrated.progress.beginnerMeadowEncounterTotal = defaults.progress.beginnerMeadowEncounterTotal;
+    }
     if (!migrated.character.beginnerJobs.includes(migrated.character.selectedJobName)) {
       migrated.character.selectedJobName = defaults.character.selectedJobName;
+    }
+    if (sourceVersion < 4) {
+      if (!Number.isInteger(progressSrc.beginnerMeadowEncounterIndex)) {
+        migrated.progress.beginnerMeadowEncounterIndex = defaults.progress.beginnerMeadowEncounterIndex;
+      }
+      if (!Number.isInteger(progressSrc.beginnerMeadowEncounterTotal)) {
+        migrated.progress.beginnerMeadowEncounterTotal = defaults.progress.beginnerMeadowEncounterTotal;
+      }
+      if (typeof battleSrc.targetSelectionEnabled !== 'boolean') {
+        migrated.battle.targetSelectionEnabled = defaults.battle.targetSelectionEnabled;
+      }
     }
 
     return migrated;
@@ -624,6 +656,11 @@
       state.waitingAction = true;
       state.pendingBattleEnd = false;
       state.turnSequence = Promise.resolve();
+      if (state.battleState && Number(state.battleState.dungeonId) === 1) {
+        state.save.progress.beginnerMeadowEncounterIndex = toInt(state.battleState.encounterIndex, 0);
+        state.save.progress.beginnerMeadowEncounterTotal = toInt(state.battleState.encounterTotal, 5);
+        persistSave();
+      }
       updateBattleState();
       setCommandEnabled(true);
       addBattleLog(data.message || 'バトル開始');
@@ -820,6 +857,8 @@
       addBattleLog(`経験値 +${data.rewards.exp} / お金 +${data.rewards.money}`);
       await loadCharacterProfile();
     }
+    state.save.progress.beginnerMeadowEncounterIndex = 0;
+    persistSave();
     addBattleLog('「冒険へ戻る」を押すとダンジョン一覧に戻ります。');
   }
 
@@ -885,18 +924,80 @@
     barEl.style.width = `${Math.floor(ratio(current, max) * 100)}%`;
   }
 
+  function getAliveEnemies() {
+    return (state.battleState?.monsters || []).filter((m) => m && m.isAlive);
+  }
+
+  function toUpperAlphabetLabel(index) {
+    let n = Math.max(0, Number(index) || 0);
+    let result = '';
+    do {
+      result = String.fromCharCode(65 + (n % 26)) + result;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return result;
+  }
+
+  function buildEnemyNameMap(monsters) {
+    const grouped = {};
+    (monsters || []).forEach((enemy) => {
+      if (!enemy || !enemy.name) return;
+      grouped[enemy.name] = grouped[enemy.name] || [];
+      grouped[enemy.name].push(enemy);
+    });
+    const nameMap = new Map();
+    Object.entries(grouped).forEach(([name, list]) => {
+      if (list.length <= 1) {
+        nameMap.set(String(list[0].id), name);
+        return;
+      }
+      list.forEach((enemy, idx) => {
+        nameMap.set(String(enemy.id), `${name}${toUpperAlphabetLabel(idx)}`);
+      });
+    });
+    return nameMap;
+  }
+
+  function getEnemyDisplayName(enemy, nameMap) {
+    if (!enemy) return '---';
+    return nameMap.get(String(enemy.id)) || enemy.name || '---';
+  }
+
+  function renderEnemyList(monsters) {
+    if (!els.enemyList) return;
+    els.enemyList.textContent = '';
+    const nameMap = buildEnemyNameMap(monsters);
+    (monsters || []).forEach((enemy) => {
+      if (!enemy) return;
+      const item = document.createElement('div');
+      item.className = `enemy-item${enemy.isAlive ? '' : ' defeated'}`;
+      const hpText = `${enemy.hp ?? '---'}/${enemy.maxHp ?? '---'}`;
+      const nameLine = document.createElement('div');
+      nameLine.className = 'enemy-item-name';
+      nameLine.textContent = getEnemyDisplayName(enemy, nameMap);
+      const hpLine = document.createElement('div');
+      hpLine.textContent = `HP ${hpText}`;
+      item.appendChild(nameLine);
+      item.appendChild(hpLine);
+      els.enemyList.appendChild(item);
+    });
+    return nameMap;
+  }
+
   function updateBattleState() {
     const battle = state.battleState;
     if (!battle) return;
 
     const player = battle.player || {};
-    const enemy = (battle.monsters || [])[0] || {};
+    const monsters = battle.monsters || [];
+    const aliveEnemy = monsters.find((m) => m && m.isAlive) || monsters[0] || {};
+    const nameMap = renderEnemyList(monsters) || new Map();
 
-    els.enemyName.textContent = enemy.name || '---';
-    els.enemyHpText.textContent = `HP ${enemy.hp ?? '---'}/${enemy.maxHp ?? '---'}`;
-    updateBar(els.enemyHpBar, enemy.hp || 0, enemy.maxHp || 1);
-    els.enemyHpBar.classList.toggle('poisoned', hasPoison(enemy));
-    renderStatusIcons(els.enemyEffects, enemy);
+    els.enemyName.textContent = getEnemyDisplayName(aliveEnemy, nameMap);
+    els.enemyHpText.textContent = `HP ${aliveEnemy.hp ?? '---'}/${aliveEnemy.maxHp ?? '---'}`;
+    updateBar(els.enemyHpBar, aliveEnemy.hp || 0, aliveEnemy.maxHp || 1);
+    els.enemyHpBar.classList.toggle('poisoned', hasPoison(aliveEnemy));
+    renderStatusIcons(els.enemyEffects, aliveEnemy);
 
     els.playerName.textContent = player.name || '---';
     els.playerHpText.textContent = `HP ${player.hp ?? '---'}/${player.maxHp ?? '---'}`;
@@ -915,9 +1016,8 @@
     });
   }
 
-  function sendBattleAction(actionType, skillId) {
+  function emitBattleAction(actionType, skillId, targetId) {
     if (!state.socket || !state.waitingAction || !state.battleState) return;
-    const target = (state.battleState.monsters || []).find((m) => m.isAlive);
     state.waitingAction = false;
     setCommandEnabled(false);
     state.save.battle.preferredCommand = actionType;
@@ -926,8 +1026,43 @@
     state.socket.emit('battle:action', {
       actionType,
       skillId: skillId || null,
-      targetId: target ? target.id : null,
+      targetId: targetId || null,
     });
+  }
+
+  function openTargetSelectionPopup(anchorEl, actionType, skillId) {
+    const aliveEnemies = getAliveEnemies();
+    if (!aliveEnemies.length) {
+      addBattleLog('対象となるモンスターがいません');
+      return;
+    }
+    const nameMap = buildEnemyNameMap(state.battleState?.monsters || []);
+    els.miniPopup.textContent = '';
+    openMiniPopup(anchorEl, 'battle-target', null);
+    aliveEnemies.forEach((enemy) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `${getEnemyDisplayName(enemy, nameMap)}（HP ${enemy.hp}/${enemy.maxHp}）`;
+      btn.addEventListener('click', () => {
+        closeMiniPopup();
+        emitBattleAction(actionType, skillId, enemy.id);
+      });
+      els.miniPopup.appendChild(btn);
+    });
+  }
+
+  function requestBattleAction(actionType, skillId, anchorEl) {
+    if (!state.socket || !state.waitingAction || !state.battleState) return;
+    const aliveEnemies = getAliveEnemies();
+    if (!aliveEnemies.length) {
+      addBattleLog('対象となるモンスターがいません');
+      return;
+    }
+    if (aliveEnemies.length === 1 || !state.save.battle.targetSelectionEnabled) {
+      emitBattleAction(actionType, skillId, aliveEnemies[0].id);
+      return;
+    }
+    openTargetSelectionPopup(anchorEl, actionType, skillId);
   }
 
   function openSkillPicker() {
@@ -950,7 +1085,7 @@
         button.textContent = `${skill.name}${mpCost}`;
         button.addEventListener('click', () => {
           hideSkillModal();
-          sendBattleAction('skill', skill.id);
+          requestBattleAction('skill', skill.id, els.commandButtons[1] || els.skillList);
         });
         els.skillList.appendChild(button);
       });
@@ -979,6 +1114,8 @@
     state.save.progress.lastDungeonId = 1;
     state.save.progress.lastDungeonName = 'はじまりの草原';
     state.save.progress.lastFloor = 1;
+    state.save.progress.beginnerMeadowEncounterIndex = 0;
+    state.save.progress.beginnerMeadowEncounterTotal = 5;
     persistSave();
   }
 
@@ -1197,7 +1334,11 @@
           openSkillPicker();
           return;
         }
-        sendBattleAction(cmd, null);
+        if (cmd === 'attack' || cmd === 'capture') {
+          requestBattleAction(cmd, null, btn);
+          return;
+        }
+        emitBattleAction(cmd, null, null);
       });
     });
 

@@ -27,9 +27,15 @@ const {
 
 // socketId → battleState のインメモリストア
 const activeBattles = new Map();
+// socketId → ダンジョン進行状態
+const activeDungeonRuns = new Map();
 
 // バトル終了通知の遅延（ms）
 const BATTLE_END_DELAY = 300;
+const BEGINNER_MEADOW_ENCOUNTER_TOTAL = 5;
+const BEGINNER_MEADOW_BOSS_MONSTER_ID = 6;
+const BEGINNER_MEADOW_NORMAL_MONSTER_IDS = [1, 2, 3, 4, 5];
+let monsterInstanceCounter = 0;
 
 /**
  * キャラクターとスキルをDBから読み込む
@@ -134,14 +140,10 @@ async function applyBattleRewards(userId, rewards) {
 /**
  * ダンジョンのモンスターをランダムに選択してエンカウント用に準備する
  */
-async function pickMonster(dungeonId, floor) {
-  const isBeginnerMeadow = Number(dungeonId) === 1;
-  const result = isBeginnerMeadow
-    ? await db.query('SELECT * FROM monsters WHERE id BETWEEN 1 AND 6 ORDER BY RANDOM() LIMIT 1')
-    : await db.query('SELECT * FROM monsters ORDER BY RANDOM() LIMIT 1');
+async function fetchMonsterWithSkills(monsterId) {
+  const result = await db.query('SELECT * FROM monsters WHERE id = $1 LIMIT 1', [monsterId]);
   if (result.rowCount === 0) return null;
   const monster = result.rows[0];
-
   const skillResult = await db.query(
     `SELECT s.* FROM skills s
      INNER JOIN monster_skills ms ON ms.skill_id = s.id
@@ -150,17 +152,23 @@ async function pickMonster(dungeonId, floor) {
     [monster.id]
   );
   monster.skills = skillResult.rows;
+  return monster;
+}
 
-  // フロアに応じてステータスを強化（10%/フロア）
+function createMonsterInstance(baseMonster, floor, instanceSuffix) {
+  if (!baseMonster) return null;
+  const monster = JSON.parse(JSON.stringify(baseMonster));
   const mult = Math.pow(1.1, (floor || 1) - 1);
-  monster.hp      = Math.ceil(monster.base_hp * mult);
-  monster.max_hp  = monster.hp;
-  monster.mp      = monster.base_max_mp;
-  monster.max_mp  = monster.base_max_mp;
-  monster.attack  = Math.ceil(monster.base_attack * mult);
+  // id はマスターモンスタIDを維持し、instance_id を戦闘中の個体識別子として使う
+  monster.instance_id = `${baseMonster.id}:${instanceSuffix}`;
+  monster.hp = Math.ceil(monster.base_hp * mult);
+  monster.max_hp = monster.hp;
+  monster.mp = monster.base_max_mp;
+  monster.max_mp = monster.base_max_mp;
+  monster.attack = Math.ceil(monster.base_attack * mult);
   monster.defense = Math.ceil(monster.base_defense * mult);
-  monster.speed   = Math.ceil(monster.base_speed * mult);
-  monster.crit_rate    = parseFloat(monster.crit_rate) || 0;
+  monster.speed = Math.ceil(monster.base_speed * mult);
+  monster.crit_rate = parseFloat(monster.crit_rate) || 0;
   monster.evasion_rate = parseFloat(monster.evasion_rate) || 0;
   monster.element = monster.base_element;
   monster.buffs = [];
@@ -168,8 +176,106 @@ async function pickMonster(dungeonId, floor) {
   monster.turnCount = 0;
   monster.escaped = false;
   monster.aiState = { specialCooldown: 3 };
-
   return monster;
+}
+
+function randomFrom(list) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function nextInstanceSuffix(prefix) {
+  monsterInstanceCounter += 1;
+  return `${prefix}-${monsterInstanceCounter}`;
+}
+
+function toLabelSuffix(index) {
+  let n = Math.max(0, Number(index) || 0);
+  let result = '';
+  do {
+    result = String.fromCharCode(97 + (n % 26)) + result;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return result;
+}
+
+async function pickMonster(dungeonId, floor, options = {}) {
+  const isBeginnerMeadow = Number(dungeonId) === 1;
+  const excludedMonsterIds = Array.isArray(options.excludedMonsterIds) ? options.excludedMonsterIds : [];
+  if (isBeginnerMeadow) {
+    const candidates = BEGINNER_MEADOW_NORMAL_MONSTER_IDS.filter(
+      (id) => !excludedMonsterIds.includes(id)
+    );
+    const pickedMonsterId = randomFrom(candidates);
+    if (!pickedMonsterId) return null;
+    const baseMonster = await fetchMonsterWithSkills(pickedMonsterId);
+    return createMonsterInstance(baseMonster, floor, nextInstanceSuffix('single'));
+  }
+  const result = await db.query('SELECT id FROM monsters ORDER BY RANDOM() LIMIT 1');
+  if (result.rowCount === 0) return null;
+  const baseMonster = await fetchMonsterWithSkills(result.rows[0].id);
+  return createMonsterInstance(baseMonster, floor, nextInstanceSuffix('single'));
+}
+
+async function buildBeginnerMeadowEncounter(encounterIndex) {
+  const idx = Number(encounterIndex) || 0;
+  if (idx === 0) {
+    const slime = await fetchMonsterWithSkills(1);
+    return [createMonsterInstance(slime, 1, 'e1-a')].filter(Boolean);
+  }
+  if (idx === 1) {
+    const monster = await pickMonster(1, 1, { excludedMonsterIds: [BEGINNER_MEADOW_BOSS_MONSTER_ID] });
+    return monster ? [monster] : [];
+  }
+  if (idx === 2 || idx === 3) {
+    const firstId = randomFrom(BEGINNER_MEADOW_NORMAL_MONSTER_IDS);
+    const secondId = randomFrom(BEGINNER_MEADOW_NORMAL_MONSTER_IDS);
+    const bases = await Promise.all([
+      fetchMonsterWithSkills(firstId),
+      fetchMonsterWithSkills(secondId),
+    ]);
+    return bases
+      .map((base, i) => createMonsterInstance(base, 1, `e${idx + 1}-${toLabelSuffix(i)}`))
+      .filter(Boolean);
+  }
+  const king = await fetchMonsterWithSkills(BEGINNER_MEADOW_BOSS_MONSTER_ID);
+  return [createMonsterInstance(king, 1, 'e5-a')].filter(Boolean);
+}
+
+async function buildEncounterMonsters(dungeonId, encounterIndex, floor) {
+  if (Number(dungeonId) === 1) {
+    return buildBeginnerMeadowEncounter(encounterIndex);
+  }
+  const monster = await pickMonster(dungeonId, floor || 1);
+  return monster ? [monster] : [];
+}
+
+function createBattleState({ dungeonId, floor, character, monsters, encounterIndex }) {
+  return {
+    turn: 1,
+    dungeonId,
+    floor,
+    encounterIndex: encounterIndex || 0,
+    encounterTotal: Number(dungeonId) === 1 ? BEGINNER_MEADOW_ENCOUNTER_TOTAL : 1,
+    player: {
+      id: character.id,
+      name: character.name,
+      hp: character.hp,
+      max_hp: character.max_hp,
+      mp: character.mp,
+      max_mp: character.max_mp,
+      attack: character.attack,
+      defense: character.defense,
+      speed: character.speed,
+      crit_rate: parseFloat(character.crit_rate) || 0,
+      evasion_rate: parseFloat(character.evasion_rate) || 0,
+      element: character.element || 'none',
+      skills: character.skills,
+      buffs: [],
+      statusEffects: [],
+    },
+    monsters,
+  };
 }
 
 function getBattleEndMessage(result) {
@@ -244,49 +350,44 @@ function registerSocketHandlers(io) {
       }
       try {
         const { dungeonId, floor } = payload || {};
+        const safeDungeonId = Number(dungeonId) || 1;
+        const safeFloor = Number(floor) || 1;
         const character = await loadCharacter(userId);
         if (!character) {
           socket.emit('battle:error', { message: 'キャラクターが見つかりません' });
           return;
         }
 
-        const monster = await pickMonster(dungeonId || 1, floor || 1);
-        if (!monster) {
+        const encounterIndex = 0;
+        const monsters = await buildEncounterMonsters(safeDungeonId, encounterIndex, safeFloor);
+        if (!monsters.length) {
           socket.emit('battle:error', { message: 'モンスターデータが見つかりません' });
           return;
         }
 
-        const battleState = {
-          turn: 1,
-          dungeonId: dungeonId || 1,
-          floor: floor || 1,
-          player: {
-            id: character.id,
-            name: character.name,
-            hp: character.hp,
-            max_hp: character.max_hp,
-            mp: character.mp,
-            max_mp: character.max_mp,
-            attack: character.attack,
-            defense: character.defense,
-            speed: character.speed,
-            crit_rate: parseFloat(character.crit_rate) || 0,
-            evasion_rate: parseFloat(character.evasion_rate) || 0,
-            element: character.element || 'none',
-            skills: character.skills,
-            buffs: [],
-            statusEffects: [],
-          },
-          monsters: [monster],
-        };
+        const battleState = createBattleState({
+          dungeonId: safeDungeonId,
+          floor: safeFloor,
+          character,
+          monsters,
+          encounterIndex,
+        });
 
         activeBattles.set(socket.id, battleState);
+        activeDungeonRuns.set(socket.id, {
+          dungeonId: safeDungeonId,
+          floor: safeFloor,
+          encounterIndex,
+          encounterTotal: battleState.encounterTotal,
+        });
 
         socket.emit('battle:start', {
           turn: battleState.turn,
           state: getBattleState(battleState),
           playerSkills: character.skills,
-          message: `${monster.name} が現れた！`,
+          message: Number(safeDungeonId) === 1
+            ? `第1戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`
+            : `${monsters.map((m) => m.name).join('、')} が現れた！`,
         });
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -319,7 +420,8 @@ function registerSocketHandlers(io) {
 
       const playerAction = {
         actionType: payload.actionType || 'attack',
-        targetId: payload.targetId || (battleState.monsters[0] && battleState.monsters[0].id),
+        targetId: payload.targetId
+          || (battleState.monsters[0] && (battleState.monsters[0].instance_id || battleState.monsters[0].id)),
         skill,
       };
 
@@ -336,8 +438,6 @@ function registerSocketHandlers(io) {
           ? calculateRewards(battleState.monsters, battleState.floor)
           : { exp: 0, money: 0 };
 
-        activeBattles.delete(socket.id);
-
         let rewardResult = null;
         if (result === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
           try {
@@ -348,22 +448,87 @@ function registerSocketHandlers(io) {
           }
         }
 
-        const endPayload = {
-          result,
-          rewards,
-          message: getBattleEndMessage(result),
-          playerSkills: rewardResult && Array.isArray(rewardResult.skills)
-            ? rewardResult.skills
-            : battleState.player.skills || [],
-          levelUp: rewardResult ? rewardResult.levelUp : null,
-        };
+        const runState = activeDungeonRuns.get(socket.id);
+        const shouldAdvanceEncounter = result === 'win'
+          && runState
+          && Number(runState.dungeonId) === 1
+          && runState.encounterIndex + 1 < BEGINNER_MEADOW_ENCOUNTER_TOTAL;
 
-        if (result === 'escape') {
-          socket.emit('battle:end', endPayload);
+        if (shouldAdvanceEncounter) {
+          const nextEncounterIndex = runState.encounterIndex + 1;
+          const monsters = await buildEncounterMonsters(runState.dungeonId, nextEncounterIndex, runState.floor);
+          if (!monsters.length) {
+            activeBattles.delete(socket.id);
+            activeDungeonRuns.delete(socket.id);
+            socket.emit('battle:end', {
+              result: 'win',
+              rewards,
+              message: '次の戦闘生成に失敗したため終了しました',
+              playerSkills: rewardResult && Array.isArray(rewardResult.skills)
+                ? rewardResult.skills
+                : battleState.player.skills || [],
+              levelUp: rewardResult ? rewardResult.levelUp : null,
+            });
+            if (typeof ack === 'function') ack({ ok: true });
+            return;
+          }
+
+          const refreshedCharacter = await loadCharacter(userId);
+          if (refreshedCharacter) {
+            battleState.player.skills = refreshedCharacter.skills || battleState.player.skills;
+          }
+          const nextBattleState = createBattleState({
+            dungeonId: runState.dungeonId,
+            floor: runState.floor,
+            encounterIndex: nextEncounterIndex,
+            monsters,
+            character: {
+              ...battleState.player,
+              id: battleState.player.id,
+              name: battleState.player.name,
+              hp: Math.max(0, battleState.player.hp),
+              max_hp: battleState.player.max_hp,
+              mp: Math.max(0, battleState.player.mp),
+              max_mp: battleState.player.max_mp,
+              skills: battleState.player.skills,
+            },
+          });
+          nextBattleState.player.buffs = [];
+          nextBattleState.player.statusEffects = [];
+          activeBattles.set(socket.id, nextBattleState);
+          activeDungeonRuns.set(socket.id, {
+            ...runState,
+            encounterIndex: nextEncounterIndex,
+          });
+
+          socket.emit('battle:start', {
+            turn: nextBattleState.turn,
+            state: getBattleState(nextBattleState),
+            playerSkills: nextBattleState.player.skills || [],
+            message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`,
+          });
         } else {
-          setTimeout(() => {
+          activeBattles.delete(socket.id);
+          activeDungeonRuns.delete(socket.id);
+          const endPayload = {
+            result,
+            rewards,
+            message: result === 'win' && runState && Number(runState.dungeonId) === 1
+              ? 'はじまりの草原を踏破した！'
+              : getBattleEndMessage(result),
+            playerSkills: rewardResult && Array.isArray(rewardResult.skills)
+              ? rewardResult.skills
+              : battleState.player.skills || [],
+            levelUp: rewardResult ? rewardResult.levelUp : null,
+          };
+
+          if (result === 'escape') {
             socket.emit('battle:end', endPayload);
-          }, BATTLE_END_DELAY);
+          } else {
+            setTimeout(() => {
+              socket.emit('battle:end', endPayload);
+            }, BATTLE_END_DELAY);
+          }
         }
       }
 
@@ -380,6 +545,7 @@ function registerSocketHandlers(io) {
 
     socket.on('disconnect', (reason) => {
       activeBattles.delete(socket.id);
+      activeDungeonRuns.delete(socket.id);
       // eslint-disable-next-line no-console
       console.log(`[socket] 切断: socketId=${socket.id} reason=${reason}`);
     });

@@ -212,6 +212,7 @@ function applySkillEffect({ attacker, target, skill }) {
 }
 
 function processEndOfTurn(combatant, actorType, actions) {
+  const combatantId = combatant.instance_id || combatant.id;
   combatant.buffs = tickBuffs(combatant.buffs || []);
   const statusEvents = processStatusEffectTick(combatant);
 
@@ -220,7 +221,7 @@ function processEndOfTurn(combatant, actorType, actions) {
       actorType: 'system',
       actorId: null,
       actionType: 'status_damage',
-      targetId: combatant.id,
+      targetId: combatantId,
       skillName: null,
       specialSkill: false,
       damage: ev.damage,
@@ -238,7 +239,7 @@ function processEndOfTurn(combatant, actorType, actions) {
       actorType: 'system',
       actorId: null,
       actionType: 'defeated',
-      targetId: combatant.id,
+      targetId: combatantId,
       skillName: null,
       specialSkill: false,
       damage: 0,
@@ -342,7 +343,7 @@ function processTurn(battleState, playerAction) {
       } else {
         const currentAliveMonsters = getAliveMonsters(monsters);
         const targetMonster = currentAliveMonsters.find(
-          (m) => String(m.id) === String(playerAction.targetId)
+          (m) => String(m.instance_id || m.id) === String(playerAction.targetId)
         ) || currentAliveMonsters[0];
 
         if (playerAction.actionType === 'skill' || playerAction.actionType === 'attack') {
@@ -421,7 +422,7 @@ function processTurn(battleState, playerAction) {
 
               actions.push({
                 actorType: 'player', actorId: player.id,
-                actionType: playerAction.actionType, targetId: targetMonster.id,
+                actionType: playerAction.actionType, targetId: targetMonster.instance_id || targetMonster.id,
                 skillName: actualSkill.name,
                 specialSkill: !!actualSkill.is_special,
                 damage, heal: 0, statusEffect,
@@ -436,7 +437,7 @@ function processTurn(battleState, playerAction) {
               if (targetMonster.hp <= 0 && !targetMonster.escaped) {
                 actions.push({
                   actorType: 'system', actorId: null, actionType: 'defeated',
-                  targetId: targetMonster.id,
+                  targetId: targetMonster.instance_id || targetMonster.id,
                   skillName: null, specialSkill: false,
                   damage: 0, heal: 0, statusEffect: null,
                   isCrit: false, isSupercrit: false, missed: false,
@@ -448,7 +449,7 @@ function processTurn(battleState, playerAction) {
         } else if (playerAction.actionType === 'capture') {
           actions.push({
             actorType: 'player', actorId: player.id,
-            actionType: 'capture', targetId: targetMonster ? targetMonster.id : null,
+            actionType: 'capture', targetId: targetMonster ? (targetMonster.instance_id || targetMonster.id) : null,
             skillName: null, specialSkill: false,
             damage: 0, heal: 0, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
@@ -477,9 +478,9 @@ function processTurn(battleState, playerAction) {
 
       const restriction = checkActionRestriction(monster);
       if (!restriction.canAct) {
-        actions.push({
-          actorType: 'monster', actorId: monster.id,
-          actionType: 'skip', targetId: null,
+          actions.push({
+            actorType: 'monster', actorId: monster.instance_id || monster.id,
+            actionType: 'skip', targetId: null,
           skillName: null, specialSkill: false,
           damage: 0, heal: 0, statusEffect: null,
           isCrit: false, isSupercrit: false, missed: false,
@@ -493,7 +494,7 @@ function processTurn(battleState, playerAction) {
           monster.escaped = true;
           monster.hp = 0;
           actions.push({
-            actorType: 'monster', actorId: monster.id,
+            actorType: 'monster', actorId: monster.instance_id || monster.id,
             actionType: 'escape', targetId: null,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
@@ -505,8 +506,8 @@ function processTurn(battleState, playerAction) {
           const healAmount = Math.floor(monster.max_hp * ((Number(skill.effect_value) || 0) / 100));
           monster.hp = Math.min(monster.max_hp, monster.hp + healAmount);
           actions.push({
-            actorType: 'monster', actorId: monster.id,
-            actionType: 'heal', targetId: monster.id,
+            actorType: 'monster', actorId: monster.instance_id || monster.id,
+            actionType: 'heal', targetId: monster.instance_id || monster.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
             damage: 0, heal: healAmount, statusEffect: null,
@@ -521,8 +522,8 @@ function processTurn(battleState, playerAction) {
             skill.effect_duration || 1
           );
           actions.push({
-            actorType: 'monster', actorId: monster.id,
-            actionType: 'skill', targetId: monster.id,
+            actorType: 'monster', actorId: monster.instance_id || monster.id,
+            actionType: 'skill', targetId: monster.instance_id || monster.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
             damage: 0, heal: 0, statusEffect: skill.effect_type,
@@ -544,7 +545,7 @@ function processTurn(battleState, playerAction) {
             : null;
 
           actions.push({
-            actorType: 'monster', actorId: monster.id,
+            actorType: 'monster', actorId: monster.instance_id || monster.id,
             actionType: 'attack', targetId: player.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
@@ -613,6 +614,10 @@ function processTurn(battleState, playerAction) {
 
 function getBattleState(battleState) {
   return {
+    dungeonId: battleState.dungeonId,
+    floor: battleState.floor,
+    encounterIndex: Number(battleState.encounterIndex) || 0,
+    encounterTotal: Number(battleState.encounterTotal) || 1,
     player: {
       id: battleState.player.id,
       name: battleState.player.name,
@@ -632,7 +637,7 @@ function getBattleState(battleState) {
       })),
     },
     monsters: battleState.monsters.map((m) => ({
-      id: m.id,
+      id: m.instance_id || m.id,
       name: m.name,
       hp: m.hp,
       maxHp: m.max_hp,
