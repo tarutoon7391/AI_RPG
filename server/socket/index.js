@@ -52,13 +52,19 @@ async function loadCharacter(userId) {
 
   let skills = [];
   if (char.current_job_id) {
+    const progress = await syncJobProgress(db, {
+      characterId: char.id,
+      jobId: char.current_job_id,
+      gainedExp: 0,
+    });
     await ensureLearnedSkillsUpToLevel(
       db,
       char.id,
       char.current_job_id,
-      char.job_level || 1
+      progress.levelAfter || char.job_level || 1
     );
     skills = await fetchLearnedSkills(db, char.id, char.current_job_id);
+    char.job_level = progress.levelAfter || char.job_level || 1;
   }
   char.skills = skills;
   return char;

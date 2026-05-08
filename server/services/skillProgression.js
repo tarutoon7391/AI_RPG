@@ -1,3 +1,5 @@
+const EXP_PER_LEVEL = 100;
+
 function toInt(value, fallback = 0) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
@@ -5,9 +7,9 @@ function toInt(value, fallback = 0) {
 }
 
 function calcLevelFromExp(totalExp) {
-  // レベル式: 累計職業EXPを100ごとに1レベル上昇（例: 0-99=>Lv1, 100-199=>Lv2）
+  // レベル式: 累計職業EXPを一定値ごとに1レベル上昇（例: 0-99=>Lv1, 100-199=>Lv2）
   const safeExp = Math.max(0, toInt(totalExp, 0));
-  return Math.max(1, Math.floor(safeExp / 100) + 1);
+  return Math.max(1, Math.floor(safeExp / EXP_PER_LEVEL) + 1);
 }
 
 async function ensureLearnedSkillsUpToLevel(executor, characterId, jobId, level) {
@@ -61,6 +63,7 @@ async function syncJobProgress(executor, { characterId, jobId, gainedExp = 0 }) 
   }
 
   await executor.query(
+    // まず職業進行レコードの存在を保証し、その後のSELECT/UPDATEで現在値を確定させる
     `INSERT INTO character_jobs (character_id, job_id, level, exp)
      VALUES ($1, $2, 1, 0)
      ON CONFLICT (character_id, job_id) DO NOTHING`,
