@@ -1013,7 +1013,14 @@
   }
 
   function isMonsterDefeatedAction(action, battle) {
-    if (!action || action.actionType !== 'defeated' || action.targetId == null) return false;
+    if (
+      !action ||
+      action.actionType !== 'defeated' ||
+      action.targetId === null ||
+      action.targetId === undefined
+    ) {
+      return false;
+    }
     const monsters = battle?.monsters || [];
     return monsters.some((monster) => monster && String(monster.id) === String(action.targetId));
   }
