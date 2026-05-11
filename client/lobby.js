@@ -71,7 +71,9 @@
   const POPUP_WIDTH_BUFFER = 270;
   const POPUP_MIN_MARGIN = 8;
   const DEFAULT_ACTION_DELAY_MS = 700;
-  const DEFEAT_LOG_DELAY_MS = 1000;
+  const DEFEAT_EFFECT_PRE_DELAY_MS = 300;
+  const DEFEAT_EFFECT_DURATION_MS = 800;
+  const DEFEAT_LOG_POST_DELAY_MS = 500;
   const EFFECT_ICON_MAP = {
     poison: '🟣',
     speed_up: '⚡',
@@ -1010,6 +1012,41 @@
     }
   }
 
+  function isMonsterDefeatTargetAction(action, battle) {
+    if (
+      !action ||
+      action.actionType !== 'defeated' ||
+      action.targetId === null ||
+      action.targetId === undefined
+    ) {
+      return false;
+    }
+    const monsters = battle?.monsters || [];
+    return monsters.some((monster) => monster && String(monster.id) === String(action.targetId));
+  }
+
+  async function playEnemyDefeatEffect(actions) {
+    const targetIds = Array.from(
+      new Set(
+        (actions || [])
+          .map((action) => action?.targetId)
+          .filter((targetId) => targetId !== null && targetId !== undefined)
+          .map((targetId) => String(targetId))
+      )
+    );
+    const cards = targetIds
+      .map((targetId) => getEnemyUiEntry(targetId)?.card)
+      .filter(Boolean);
+    if (!cards.length) return;
+    if (els.enemyList) {
+      els.enemyList.style.setProperty('--enemy-defeat-duration', `${DEFEAT_EFFECT_DURATION_MS}ms`);
+    }
+    cards.forEach((card) => card.classList.remove('enemy-defeat-fadeout'));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    cards.forEach((card) => card.classList.add('enemy-defeat-fadeout'));
+    await wait(DEFEAT_EFFECT_DURATION_MS);
+  }
+
   function upsertEffectEntry(entries, next) {
     const baseEntries = Array.isArray(entries) ? entries : [];
     if (!next || !next.type) return baseEntries;
@@ -1137,7 +1174,8 @@
     const actions = Array.isArray(data.actions) ? data.actions.filter(Boolean) : [];
     let enemyTurnShown = false;
 
-    for (const action of actions) {
+    for (let actionIndex = 0; actionIndex < actions.length; actionIndex += 1) {
+      const action = actions[actionIndex];
       if (sessionId !== state.battleSessionId) return;
       if (action.actorType === 'monster' && !enemyTurnShown) {
         addBattleLog('敵のターン');
@@ -1145,22 +1183,39 @@
         await wait(600);
       }
 
+      if (isMonsterDefeatTargetAction(action, visualState)) {
+        const defeatedActions = [action];
+        while (
+          actionIndex + 1 < actions.length &&
+          isMonsterDefeatTargetAction(actions[actionIndex + 1], visualState)
+        ) {
+          actionIndex += 1;
+          defeatedActions.push(actions[actionIndex]);
+        }
+        defeatedActions.forEach((defeatedAction) => applyActionToBattleState(visualState, defeatedAction));
+        state.battleState = visualState;
+        updateBattleState();
+        setCommandEnabled(false);
+        await wait(DEFEAT_EFFECT_PRE_DELAY_MS);
+        await playEnemyDefeatEffect(defeatedActions);
+        defeatedActions.forEach((defeatedAction) => {
+          if (defeatedAction.message) addBattleLog(defeatedAction.message);
+        });
+        await wait(DEFEAT_LOG_POST_DELAY_MS);
+        continue;
+      }
+
       if (action.specialSkill && action.skillName) {
         addBattleLog(action.skillName, { className: 'battle-log-special' });
       } else if (action.message) {
         addBattleLog(action.message);
       }
-
       applyActionToBattleState(visualState, action);
       state.battleState = visualState;
       updateBattleState();
 
       await playDamageEffect(action);
-      if (action.actionType === 'defeated') {
-        await wait(DEFEAT_LOG_DELAY_MS);
-      } else {
-        await wait(DEFAULT_ACTION_DELAY_MS);
-      }
+      await wait(DEFAULT_ACTION_DELAY_MS);
     }
 
     if (sessionId !== state.battleSessionId) return;

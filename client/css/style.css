@@ -323,6 +323,12 @@ button.secondary,
   opacity: 0.55;
 }
 
+.enemy-card.enemy-defeat-fadeout {
+  opacity: 1;
+  pointer-events: none;
+  animation: enemy-defeat-fadeout var(--enemy-defeat-duration, 800ms) linear forwards;
+}
+
 .enemy-card-name {
   color: #ffa7b0;
   font-weight: 700;
@@ -587,6 +593,20 @@ button.secondary,
   40% { transform: translateX(8px); }
   60% { transform: translateX(-6px); }
   80% { transform: translateX(6px); }
+}
+
+@keyframes enemy-defeat-fadeout {
+  0% { transform: translateX(0); opacity: 1; }
+  10% { transform: translateX(-4px); opacity: 0.96; }
+  20% { transform: translateX(4px); opacity: 0.9; }
+  30% { transform: translateX(-3px); opacity: 0.82; }
+  40% { transform: translateX(3px); opacity: 0.72; }
+  50% { transform: translateX(-4px); opacity: 0.6; }
+  60% { transform: translateX(4px); opacity: 0.46; }
+  70% { transform: translateX(-3px); opacity: 0.32; }
+  80% { transform: translateX(3px); opacity: 0.2; }
+  90% { transform: translateX(-2px); opacity: 0.1; }
+  100% { transform: translateX(0); opacity: 0; }
 }
 
 /* 装備ボーナス（緑）・永続ボーナス（黄色）表示 */
