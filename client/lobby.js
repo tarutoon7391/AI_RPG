@@ -143,6 +143,9 @@
     pendingAction: null,
     battleSessionId: 0,
     enemyUiMap: new Map(),
+    pendingWaits: new Set(),
+    activeBattleTurn: false,
+    resumeFromBackground: false,
   };
 
   const els = {
@@ -880,12 +883,12 @@
     state.socket = io({ withCredentials: true });
 
     state.socket.on('battle:start', (data) => {
-      const nextSessionId = state.battleSessionId + 1;
-      state.battleSessionId = nextSessionId;
-      closeMiniPopup();
-      hideSkillModal();
-      hideBattleResultOverlay();
-      state.turnSequence = Promise.resolve().then(() => {
+      queueBattleTask(() => {
+        const nextSessionId = state.battleSessionId + 1;
+        state.battleSessionId = nextSessionId;
+        closeMiniPopup();
+        hideSkillModal();
+        hideBattleResultOverlay();
         if (nextSessionId !== state.battleSessionId) return;
         state.battleState = data.state || null;
         state.playerSkills = data.playerSkills || [];
@@ -907,31 +910,28 @@
           addBattleLog('あなたのターン');
         }
         setBattleVisible(true);
+      }, (err) => {
+        console.error('[battle:start] 処理失敗:', err);
+        addBattleLog('バトル開始処理でエラーが発生しました');
       });
     });
 
     state.socket.on('battle:turn', (data) => {
-      const sessionId = state.battleSessionId;
-      state.turnSequence = state.turnSequence
-        .then(() => processBattleTurn(data, sessionId))
-        .catch((err) => {
-          console.error('[battle:turn] 処理失敗:', err);
-          addBattleLog('バトル処理でエラーが発生しました');
-          if (isBattleContinuable()) {
-            state.waitingAction = true;
-            setCommandEnabled(true);
-          }
-        });
+      queueBattleTask(() => processBattleTurn(data, state.battleSessionId), (err) => {
+        console.error('[battle:turn] 処理失敗:', err);
+        addBattleLog('バトル処理でエラーが発生しました');
+        if (isBattleContinuable()) {
+          state.waitingAction = true;
+          setCommandEnabled(true);
+        }
+      });
     });
 
     state.socket.on('battle:end', (data) => {
-      const sessionId = state.battleSessionId;
-      state.turnSequence = state.turnSequence
-        .then(() => processBattleEnd(data, sessionId))
-        .catch((err) => {
-          console.error('[battle:end] 処理失敗:', err);
-          addBattleLog('終了処理でエラーが発生しました');
-        });
+      queueBattleTask(() => processBattleEnd(data, state.battleSessionId), (err) => {
+        console.error('[battle:end] 処理失敗:', err);
+        addBattleLog('終了処理でエラーが発生しました');
+      });
     });
 
     state.socket.on('battle:error', (data) => {
@@ -954,11 +954,30 @@
     state.waitingAction = false;
     state.characterData = null;
     state.battleSessionId = 0;
+    state.activeBattleTurn = false;
+    state.resumeFromBackground = false;
+    releasePendingWaits();
     closeMiniPopup();
     hideBattleResultOverlay();
     disconnectSocket();
     setBattleVisible(false);
     setCommandEnabled(false);
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden || !state.battleState) return;
+    closeMiniPopup();
+    hideSkillModal();
+    state.resumeFromBackground = state.activeBattleTurn;
+    if (state.activeBattleTurn) {
+      releasePendingWaits();
+    }
+    if (state.socket && !state.socket.connected) {
+      state.socket.connect();
+    }
+    if (isBattleContinuable() && state.waitingAction) {
+      setCommandEnabled(true);
+    }
   }
 
   function addBattleLog(message, options = {}) {
@@ -972,7 +991,39 @@
   }
 
   function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      const entry = {
+        timerId: null,
+        done: false,
+        finish: null,
+      };
+      const finish = () => {
+        if (entry.done) return;
+        entry.done = true;
+        if (entry.timerId !== null) clearTimeout(entry.timerId);
+        state.pendingWaits.delete(entry);
+        resolve();
+      };
+      entry.finish = finish;
+      entry.timerId = setTimeout(finish, Math.max(0, Number(ms) || 0));
+      state.pendingWaits.add(entry);
+    });
+  }
+
+  function releasePendingWaits() {
+    Array.from(state.pendingWaits).forEach((entry) => entry.finish());
+  }
+
+  function queueBattleTask(task, onError) {
+    state.turnSequence = state.turnSequence
+      .then(() => task())
+      .catch((err) => {
+        if (typeof onError === 'function') {
+          onError(err);
+          return;
+        }
+        console.error('[battle] 処理失敗:', err);
+      });
   }
 
   async function playShake(targets, className, duration = 300) {
@@ -1038,6 +1089,10 @@
       .map((targetId) => getEnemyUiEntry(targetId)?.card)
       .filter(Boolean);
     if (!cards.length) return;
+    if (state.resumeFromBackground) {
+      state.resumeFromBackground = false;
+      return;
+    }
     if (els.enemyList) {
       els.enemyList.style.setProperty('--enemy-defeat-duration', `${DEFEAT_EFFECT_DURATION_MS}ms`);
     }
@@ -1077,6 +1132,29 @@
     const fallbackEnemy = aliveEnemies[0] || (state.battleState?.monsters || [])[0] || null;
     const entry = getEnemyUiEntry(targetId || fallbackEnemy?.id);
     return [entry?.visual, entry?.hpText, entry?.card].filter(Boolean);
+  }
+
+  function normalizeEnemyTargetIds(targetIds) {
+    return Array.from(new Set(
+      (targetIds || [])
+        .map((targetId) => (targetId === null || targetId === undefined ? '' : String(targetId)))
+        .filter(Boolean)
+    ));
+  }
+
+  function removeEnemyCards(targetIds) {
+    const ids = normalizeEnemyTargetIds(targetIds);
+    ids.forEach((targetId) => {
+      const entry = getEnemyUiEntry(targetId);
+      if (entry?.card) {
+        entry.card.classList.remove('enemy-defeat-fadeout');
+        entry.card.remove();
+      }
+      state.enemyUiMap.delete(targetId);
+    });
+    if (els.enemyList) {
+      els.enemyList.classList.toggle('single', state.enemyUiMap.size === 1);
+    }
   }
 
   function cloneBattleState(battle) {
@@ -1128,6 +1206,12 @@
       (m) => m && String(m.id) === String(action.targetId)
     );
     if (!targetMonster) return;
+    if (action.actionType === 'defeated') {
+      // 撃破確定時だけ isAlive を落とし、直前のダメージ反映中はカードを残してフェードアウトにつなげる
+      targetMonster.hp = 0;
+      targetMonster.isAlive = false;
+      return;
+    }
     if (action.heal && action.heal > 0) {
       targetMonster.hp = Math.min(targetMonster.maxHp || targetMonster.hp || 0, (targetMonster.hp || 0) + action.heal);
     } else if (!action.missed && action.damage && action.damage > 0) {
@@ -1150,7 +1234,9 @@
     }
     targetMonster.statusEffects = removeEffectEntries(targetMonster.statusEffects || [], removedStatusTypes);
     targetMonster.buffs = removeEffectEntries(targetMonster.buffs || [], removedBuffTypes);
-    targetMonster.isAlive = !targetMonster.escaped && targetMonster.hp > 0;
+    if (targetMonster.hp > 0) {
+      targetMonster.isAlive = !targetMonster.escaped;
+    }
   }
 
   function isBattleContinuable() {
@@ -1163,72 +1249,82 @@
 
   async function processBattleTurn(data, sessionId) {
     if (sessionId !== state.battleSessionId) return;
-    state.pendingBattleEnd = false;
-    const nextState = data.state || null;
-    const visualState = cloneBattleState(state.battleState) || cloneBattleState(nextState);
-    state.battleState = visualState;
-    updateBattleState();
-    state.waitingAction = false;
-    setCommandEnabled(false);
-
-    const actions = Array.isArray(data.actions) ? data.actions.filter(Boolean) : [];
-    let enemyTurnShown = false;
-
-    for (let actionIndex = 0; actionIndex < actions.length; actionIndex += 1) {
-      const action = actions[actionIndex];
-      if (sessionId !== state.battleSessionId) return;
-      if (action.actorType === 'monster' && !enemyTurnShown) {
-        addBattleLog('敵のターン');
-        enemyTurnShown = true;
-        await wait(600);
-      }
-
-      if (isMonsterDefeatTargetAction(action, visualState)) {
-        const defeatedActions = [action];
-        while (
-          actionIndex + 1 < actions.length &&
-          isMonsterDefeatTargetAction(actions[actionIndex + 1], visualState)
-        ) {
-          actionIndex += 1;
-          defeatedActions.push(actions[actionIndex]);
-        }
-        defeatedActions.forEach((defeatedAction) => applyActionToBattleState(visualState, defeatedAction));
-        state.battleState = visualState;
-        updateBattleState();
-        setCommandEnabled(false);
-        await wait(DEFEAT_EFFECT_PRE_DELAY_MS);
-        await playEnemyDefeatEffect(defeatedActions);
-        defeatedActions.forEach((defeatedAction) => {
-          if (defeatedAction.message) addBattleLog(defeatedAction.message);
-        });
-        await wait(DEFEAT_LOG_POST_DELAY_MS);
-        continue;
-      }
-
-      if (action.specialSkill && action.skillName) {
-        addBattleLog(action.skillName, { className: 'battle-log-special' });
-      } else if (action.message) {
-        addBattleLog(action.message);
-      }
-      applyActionToBattleState(visualState, action);
+    state.activeBattleTurn = true;
+    try {
+      state.pendingBattleEnd = false;
+      const nextState = data.state || null;
+      const visualState = cloneBattleState(state.battleState) || cloneBattleState(nextState);
       state.battleState = visualState;
       updateBattleState();
+      state.waitingAction = false;
+      setCommandEnabled(false);
 
-      await playDamageEffect(action);
-      await wait(DEFAULT_ACTION_DELAY_MS);
+      const actions = Array.isArray(data.actions) ? data.actions.filter(Boolean) : [];
+      let enemyTurnShown = false;
+
+      for (let actionIndex = 0; actionIndex < actions.length; actionIndex += 1) {
+        const action = actions[actionIndex];
+        if (sessionId !== state.battleSessionId) return;
+        if (action.actorType === 'monster' && !enemyTurnShown) {
+          addBattleLog('敵のターン');
+          enemyTurnShown = true;
+          await wait(600);
+        }
+
+        if (isMonsterDefeatTargetAction(action, visualState)) {
+          const defeatedActions = [action];
+          while (
+            actionIndex + 1 < actions.length &&
+            isMonsterDefeatTargetAction(actions[actionIndex + 1], visualState)
+          ) {
+            actionIndex += 1;
+            defeatedActions.push(actions[actionIndex]);
+          }
+          const defeatedIds = normalizeEnemyTargetIds(
+            defeatedActions.map((defeatedAction) => defeatedAction?.targetId)
+          );
+          defeatedActions.forEach((defeatedAction) => applyActionToBattleState(visualState, defeatedAction));
+          state.battleState = visualState;
+          setCommandEnabled(false);
+          await wait(DEFEAT_EFFECT_PRE_DELAY_MS);
+          await playEnemyDefeatEffect(defeatedActions);
+          removeEnemyCards(defeatedIds);
+          updateBattleState();
+          defeatedActions.forEach((defeatedAction) => {
+            if (defeatedAction.message) addBattleLog(defeatedAction.message);
+          });
+          await wait(DEFEAT_LOG_POST_DELAY_MS);
+          continue;
+        }
+
+        if (action.specialSkill && action.skillName) {
+          addBattleLog(action.skillName, { className: 'battle-log-special' });
+        } else if (action.message) {
+          addBattleLog(action.message);
+        }
+        applyActionToBattleState(visualState, action);
+        state.battleState = visualState;
+        updateBattleState();
+
+        await playDamageEffect(action);
+        await wait(DEFAULT_ACTION_DELAY_MS);
+      }
+
+      if (sessionId !== state.battleSessionId) return;
+      state.battleState = nextState;
+      updateBattleState();
+
+      if (!isBattleContinuable()) return;
+      const awaitingPlayerAction = data.awaitingPlayerAction !== false;
+      state.waitingAction = awaitingPlayerAction;
+      if (awaitingPlayerAction) {
+        addBattleLog('あなたのターン');
+      }
+      setCommandEnabled(awaitingPlayerAction);
+    } finally {
+      state.activeBattleTurn = false;
+      state.resumeFromBackground = false;
     }
-
-    if (sessionId !== state.battleSessionId) return;
-    state.battleState = nextState;
-    updateBattleState();
-
-    if (!isBattleContinuable()) return;
-    const awaitingPlayerAction = data.awaitingPlayerAction !== false;
-    state.waitingAction = awaitingPlayerAction;
-    if (awaitingPlayerAction) {
-      addBattleLog('あなたのターン');
-    }
-    setCommandEnabled(awaitingPlayerAction);
   }
 
   async function processBattleEnd(data, sessionId) {
@@ -1349,6 +1445,11 @@
     return hasStatusEffect(entity, 'poison');
   }
 
+  function isVisibleEnemy(enemy) {
+    // 旧データ互換のため、isAlive が未定義の敵は表示対象として扱う
+    return !!enemy && enemy.isAlive !== false;
+  }
+
   function ratio(value, max) {
     if (!max || max <= 0) return 0;
     return Math.max(0, Math.min(1, value / max));
@@ -1399,13 +1500,13 @@
 
   function renderEnemyList(monsters) {
     if (!els.enemyList) return;
+    const visibleMonsters = (monsters || []).filter(isVisibleEnemy);
     els.enemyList.textContent = '';
     state.enemyUiMap = new Map();
-    const enemyCount = (monsters || []).filter(Boolean).length;
+    const enemyCount = visibleMonsters.length;
     els.enemyList.classList.toggle('single', enemyCount === 1);
-    const nameMap = buildEnemyNameMap(monsters);
-    (monsters || []).forEach((enemy) => {
-      if (!enemy) return;
+    const nameMap = buildEnemyNameMap(visibleMonsters);
+    visibleMonsters.forEach((enemy) => {
       const card = document.createElement('div');
       card.className = `enemy-card${enemy.isAlive ? '' : ' defeated'}`;
 
@@ -1840,6 +1941,7 @@
       closeMiniPopup();
     });
 
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('resize', closeMiniPopup);
     window.addEventListener('scroll', closeMiniPopup, true);
   }
