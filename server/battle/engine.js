@@ -211,6 +211,12 @@ function checkEffectChance(skill) {
   return Math.random() * 100 < Math.max(0, Math.min(100, chance));
 }
 
+function getEffectCategory(effectType) {
+  return effectType && (effectType.endsWith('_up') || effectType.endsWith('_down'))
+    ? 'buff'
+    : 'status';
+}
+
 function applySkillEffect({ attacker, target, skill }) {
   if (!skill || !target || !skill.effect_type) return null;
 
@@ -222,7 +228,7 @@ function applySkillEffect({ attacker, target, skill }) {
       type: effectType,
       value,
       turns: duration,
-      category: effectType.endsWith('_up') || effectType.endsWith('_down') ? 'buff' : 'status',
+      category: getEffectCategory(effectType),
       applied: false,
       attempted: true,
     };
@@ -580,9 +586,7 @@ function processTurn(battleState, playerAction) {
                     type: actualSkill.effect_type,
                     value: Number(actualSkill.effect_value) || 0,
                     turns: Math.max(1, Math.floor(Number(actualSkill.effect_duration) || 1)),
-                    category: actualSkill.effect_type.endsWith('_up') || actualSkill.effect_type.endsWith('_down')
-                      ? 'buff'
-                      : 'status',
+                    category: getEffectCategory(actualSkill.effect_type),
                     applied: false,
                     attempted: true,
                   }
@@ -731,9 +735,7 @@ function processTurn(battleState, playerAction) {
                 type: skill.effect_type,
                 value: Number(skill.effect_value) || 0,
                 turns: Math.max(1, Math.floor(Number(skill.effect_duration) || 1)),
-                category: skill.effect_type.endsWith('_up') || skill.effect_type.endsWith('_down')
-                  ? 'buff'
-                  : 'status',
+                category: getEffectCategory(skill.effect_type),
                 applied: false,
                 attempted: true,
               }

@@ -75,8 +75,8 @@
     speed_down: '⬇️',
     defense_up: '🛡️',
     attack_up: '⚔️',
-    defense_down: '🛡️',
-    attack_down: '⚔️',
+    defense_down: '🛡️⬇️',
+    attack_down: '⚔️⬇️',
     sleep: '💤',
   };
   const EFFECT_NAME_MAP = {
