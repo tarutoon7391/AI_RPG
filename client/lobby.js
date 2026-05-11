@@ -162,8 +162,12 @@
     charGold: document.getElementById('char-gold'),
     charHp: document.getElementById('char-hp'),
     charMaxHp: document.getElementById('char-max-hp'),
+    charHpEquip: document.getElementById('char-hp-equip'),
+    charHpPerm: document.getElementById('char-hp-perm'),
     charMp: document.getElementById('char-mp'),
     charMaxMp: document.getElementById('char-max-mp'),
+    charMpEquip: document.getElementById('char-mp-equip'),
+    charMpPerm: document.getElementById('char-mp-perm'),
     charAtk: document.getElementById('char-atk'),
     charAtkEquip: document.getElementById('char-atk-equip'),
     charAtkPerm: document.getElementById('char-atk-perm'),
@@ -565,35 +569,39 @@
     els.charNextExp.textContent = String(nextExp);
     els.charGold.textContent = String(base.money);
 
-    // HP/MPは permanent_bonus が max_hp に baked-in 済み（DB値そのまま）
+    function renderBonusText(targetEl, value, negativeClassName) {
+      if (!targetEl) return;
+      const amount = toInt(value, 0);
+      if (amount === 0) {
+        targetEl.textContent = '';
+        targetEl.classList.add('hidden');
+        if (negativeClassName) targetEl.classList.remove(negativeClassName);
+        return;
+      }
+      targetEl.textContent = `(${amount > 0 ? '+' : ''}${amount})`;
+      targetEl.classList.remove('hidden');
+      if (negativeClassName) {
+        targetEl.classList.toggle(negativeClassName, amount < 0);
+      }
+    }
+
+    // HP/MPは現在値・最大値を表示しつつ、最大値に対する装備/永続ボーナスを括弧で補足表示する
     els.charHp.textContent = String(Math.max(0, base.hp + bonus.hp));
     els.charMaxHp.textContent = String(Math.max(0, base.maxHp + bonus.maxHp));
     els.charMp.textContent = String(Math.max(0, base.mp + bonus.mp));
     els.charMaxMp.textContent = String(Math.max(0, base.maxMp + bonus.maxMp));
+    renderBonusText(els.charHpEquip, bonus.maxHp, 'negative');
+    renderBonusText(els.charHpPerm, perm.hp);
+    renderBonusText(els.charMpEquip, bonus.maxMp, 'negative');
+    renderBonusText(els.charMpPerm, perm.mp);
 
     // 各ステータスのボーナス表示ヘルパー
     function renderStatWithBonus(valueEl, equipBonusEl, permBonusEl, baseVal, equipBonus, permBonus) {
       // 成長ステータス = DBの値 - 永続ボーナス（永続ボーナスを除いた通常成長分）
       const growthStat = Math.max(0, baseVal - permBonus);
       valueEl.textContent = String(growthStat);
-      if (equipBonusEl) {
-        if (equipBonus > 0) {
-          equipBonusEl.textContent = `(+${equipBonus})`;
-          equipBonusEl.classList.remove('hidden');
-        } else {
-          equipBonusEl.textContent = '';
-          equipBonusEl.classList.add('hidden');
-        }
-      }
-      if (permBonusEl) {
-        if (permBonus > 0) {
-          permBonusEl.textContent = `(+${permBonus})`;
-          permBonusEl.classList.remove('hidden');
-        } else {
-          permBonusEl.textContent = '';
-          permBonusEl.classList.add('hidden');
-        }
-      }
+      renderBonusText(equipBonusEl, equipBonus, 'negative');
+      renderBonusText(permBonusEl, permBonus);
     }
 
     renderStatWithBonus(els.charAtk,  els.charAtkEquip,  els.charAtkPerm,  base.attack,   bonus.attack,   perm.attack);
