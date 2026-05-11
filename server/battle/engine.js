@@ -213,7 +213,7 @@ function checkEffectChance(skill) {
 
 function getEffectCategory(effectType) {
   if (!effectType) return null;
-  return effectType && (effectType.endsWith('_up') || effectType.endsWith('_down'))
+  return (effectType.endsWith('_up') || effectType.endsWith('_down'))
     ? 'buff'
     : 'status';
 }
