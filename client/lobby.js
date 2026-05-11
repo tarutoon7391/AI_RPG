@@ -569,7 +569,7 @@
     els.charNextExp.textContent = String(nextExp);
     els.charGold.textContent = String(base.money);
 
-    function renderBonusText(targetEl, value, positiveClassName, negativeClassName) {
+    function renderBonusText(targetEl, value, negativeClassName) {
       if (!targetEl) return;
       const amount = toInt(value, 0);
       if (amount === 0) {
@@ -583,9 +583,6 @@
       if (negativeClassName) {
         targetEl.classList.toggle(negativeClassName, amount < 0);
       }
-      if (positiveClassName) {
-        targetEl.classList.toggle(positiveClassName, amount > 0);
-      }
     }
 
     // HP/MPは現在値・最大値を表示しつつ、最大値に対する装備/永続ボーナスを括弧で補足表示する
@@ -593,18 +590,18 @@
     els.charMaxHp.textContent = String(Math.max(0, base.maxHp + bonus.maxHp));
     els.charMp.textContent = String(Math.max(0, base.mp + bonus.mp));
     els.charMaxMp.textContent = String(Math.max(0, base.maxMp + bonus.maxMp));
-    renderBonusText(els.charHpEquip, bonus.maxHp, null, 'negative');
-    renderBonusText(els.charHpPerm, perm.hp, null, null);
-    renderBonusText(els.charMpEquip, bonus.maxMp, null, 'negative');
-    renderBonusText(els.charMpPerm, perm.mp, null, null);
+    renderBonusText(els.charHpEquip, bonus.maxHp, 'negative');
+    renderBonusText(els.charHpPerm, perm.hp);
+    renderBonusText(els.charMpEquip, bonus.maxMp, 'negative');
+    renderBonusText(els.charMpPerm, perm.mp);
 
     // 各ステータスのボーナス表示ヘルパー
     function renderStatWithBonus(valueEl, equipBonusEl, permBonusEl, baseVal, equipBonus, permBonus) {
       // 成長ステータス = DBの値 - 永続ボーナス（永続ボーナスを除いた通常成長分）
       const growthStat = Math.max(0, baseVal - permBonus);
       valueEl.textContent = String(growthStat);
-      renderBonusText(equipBonusEl, equipBonus, null, 'negative');
-      renderBonusText(permBonusEl, permBonus, null, null);
+      renderBonusText(equipBonusEl, equipBonus, 'negative');
+      renderBonusText(permBonusEl, permBonus);
     }
 
     renderStatWithBonus(els.charAtk,  els.charAtkEquip,  els.charAtkPerm,  base.attack,   bonus.attack,   perm.attack);
