@@ -644,7 +644,7 @@
     }
     state.save.character.lastGrowthJobName = currentJobName;
     persistSave();
-    const line = `HP +${toInt(growth.hp, 0)} / MP +${toInt(growth.mp, 0)} / 攻撃力 +${toInt(growth.attack, 0)} / 防御力 +${toInt(growth.defense, 0)} / 回復力 +${toInt(growth.recovery, 0)} / 素早さ +${toInt(growth.speed, 0)} / 魅力度 +${toInt(growth.charm, 0)}`;
+    const line = `HP +${toInt(growth.hp, 0)} / 攻撃力 +${toInt(growth.attack, 0)} / 防御力 +${toInt(growth.defense, 0)} / MP +${toInt(growth.mp, 0)} / 素早さ +${toInt(growth.speed, 0)} / 回復力 +${toInt(growth.recovery, 0)} / 魅力度 +${toInt(growth.charm, 0)}`;
     showModal(`${currentJobName}の成長値（1レベルあたり）\n${line}`);
   }
 
