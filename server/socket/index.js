@@ -42,6 +42,12 @@ const BEGINNER_MEADOW_BOSS_MONSTER_ID = 6;
 const BEGINNER_MEADOW_NORMAL_MONSTER_IDS = [1, 2, 3, 4, 5];
 let monsterInstanceCounter = 0;
 
+function toInt(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.floor(num);
+}
+
 /**
  * キャラクターとスキルをDBから読み込む
  */
@@ -125,7 +131,25 @@ async function applyBattleRewards(userId, rewards) {
         levelAfter: progress.levelAfter,
         learnedSkillNames: (progress.newlyLearnedSkills || []).map((s) => s.name),
         statGrowth: progress.statGrowth || null,
+        permanentBonusGained: (progress.statGrowth && progress.statGrowth.permanentBonusGained) || null,
       };
+
+      // レベルアップ時はHP・MPが applyLevelGrowthToCharacter 内で全回復済み
+      // 戦闘終了時（勝利・逃走問わず）に必ずHPを最大値まで全回復してからロビーに戻る
+      await client.query(
+        `UPDATE characters
+         SET hp = max_hp, mp = max_mp, updated_at = NOW()
+         WHERE id = $1`,
+        [char.id]
+      );
+    } else {
+      // 職業なしの場合も戦闘終了時はHP全回復
+      await client.query(
+        `UPDATE characters
+         SET hp = max_hp, mp = max_mp, updated_at = NOW()
+         WHERE id = $1`,
+        [char.id]
+      );
     }
 
     await client.query('COMMIT');
@@ -358,6 +382,21 @@ async function finalizeBattleResult({
     }
   }
 
+  // 戦闘終了時（勝利・逃走・敗北問わず）にHPを最大値まで全回復する
+  // ※ applyBattleRewards（勝利でレポート付き）の中で既にHP回復している場合はスキップしても問題なし
+  if (userId && !rewardResult) {
+    try {
+      await db.query(
+        `UPDATE characters SET hp = max_hp, mp = max_mp, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[socket] HP全回復エラー:', err);
+    }
+  }
+
   const runState = activeDungeonRuns.get(socket.id);
   const baseRun = runState || {
     dungeonId: battleState.dungeonId,
@@ -402,22 +441,27 @@ async function finalizeBattleResult({
     if (refreshedCharacter) {
       battleState.player.skills = refreshedCharacter.skills || battleState.player.skills;
     }
+    // 次の戦闘用にキャラクター情報を最新化（レベルアップ後のステータスを反映）
+    // ターン状態（バフ・状態異常）は新しい戦闘でリセットする
+    const nextCharacter = refreshedCharacter || battleState.player;
     const nextBattleState = createBattleState({
       dungeonId: baseRun.dungeonId,
       floor: baseRun.floor,
       encounterIndex: nextEncounterIndex,
       monsters,
       character: {
-        ...battleState.player,
-        id: battleState.player.id,
-        name: battleState.player.name,
-        hp: Math.max(0, battleState.player.hp),
-        max_hp: battleState.player.max_hp,
-        mp: Math.max(0, battleState.player.mp),
-        max_mp: battleState.player.max_mp,
-        skills: battleState.player.skills,
+        ...nextCharacter,
+        id: nextCharacter.id || battleState.player.id,
+        name: nextCharacter.name || battleState.player.name,
+        // applyBattleRewards でHP/MPは既に全回復済みのためDBから取得したmax値を使う
+        hp: toInt(nextCharacter.max_hp || battleState.player.max_hp),
+        max_hp: toInt(nextCharacter.max_hp || battleState.player.max_hp),
+        mp: toInt(nextCharacter.max_mp || battleState.player.max_mp),
+        max_mp: toInt(nextCharacter.max_mp || battleState.player.max_mp),
+        skills: nextCharacter.skills || battleState.player.skills,
       },
     });
+    // バフ・状態異常は新しい戦闘でリセット（ターン状態の引き継ぎを防ぐ）
     nextBattleState.player.buffs = [];
     nextBattleState.player.statusEffects = [];
     activeBattles.set(socket.id, nextBattleState);
@@ -571,6 +615,9 @@ function registerSocketHandlers(io) {
           monsters,
           encounterIndex,
         });
+        // 新しい戦闘開始時はターン状態をリセットしてから素早さ比較を行う
+        battleState.player.buffs = [];
+        battleState.player.statusEffects = [];
 
         activeBattles.set(socket.id, battleState);
         activeDungeonRuns.set(socket.id, {

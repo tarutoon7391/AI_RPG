@@ -9,6 +9,7 @@ const {
   ensureLearnedSkillsUpToLevel,
   fetchLearnedSkills,
   syncJobProgress,
+  applyJobChangeStats,
 } = require('../services/skillProgression');
 
 const router = express.Router();
@@ -63,6 +64,10 @@ router.get('/me', requireAuth, async (req, res) => {
     const char = charResult.rows[0];
     if (!char.name || !char.name.trim()) {
       char.name = char.username;
+    }
+    // permanent_bonus が null の場合は空オブジェクトに正規化
+    if (!char.permanent_bonus || typeof char.permanent_bonus !== 'object') {
+      char.permanent_bonus = {};
     }
 
     // スキル一覧（現在の職業のスキル）
@@ -127,6 +132,12 @@ router.post('/job', requireAuth, characterJobRateLimit, async (req, res) => {
        WHERE id = $2`,
       [job.id, character.id]
     );
+
+    // 転職先職業のLv1基礎ステータス + 永続ボーナスでステータスをリセット
+    await applyJobChangeStats(client, {
+      characterId: character.id,
+      jobId: job.id,
+    });
 
     await syncJobProgress(client, {
       characterId: character.id,
