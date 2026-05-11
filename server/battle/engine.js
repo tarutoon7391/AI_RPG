@@ -30,6 +30,26 @@ const STATUS_LABELS = {
   [STATUS_TYPES.BURN]: 'やけど',
 };
 
+const EFFECT_APPLY_MESSAGES = {
+  poison: (name) => `${name} は毒にかかった！`,
+  speed_up: (name) => `${name} の素早さが上がった！`,
+  speed_down: (name) => `${name} の素早さが下がった！`,
+  defense_up: (name) => `${name} の防御力が上がった！`,
+  defense_down: (name) => `${name} の防御力が下がった！`,
+  attack_up: (name) => `${name} の攻撃力が上がった！`,
+  attack_down: (name) => `${name} の攻撃力が下がった！`,
+};
+
+const EFFECT_EXPIRE_MESSAGES = {
+  poison: (name) => `${name} の毒が解けた！`,
+  speed_up: (name) => `${name} の素早さが元に戻った！`,
+  speed_down: (name) => `${name} の素早さが元に戻った！`,
+  defense_up: (name) => `${name} の防御力が元に戻った！`,
+  defense_down: (name) => `${name} の防御力が元に戻った！`,
+  attack_up: (name) => `${name} の攻撃力が元に戻った！`,
+  attack_down: (name) => `${name} の攻撃力が元に戻った！`,
+};
+
 const STAT_BUFF_KEY = {
   attack: 'attack',
   defense: 'defense',
@@ -173,9 +193,15 @@ function applyBuff(buffs, type, value, turns) {
 }
 
 function tickBuffs(buffs) {
-  return (Array.isArray(buffs) ? buffs : [])
+  const expired = [];
+  const active = (Array.isArray(buffs) ? buffs : [])
     .map((b) => ({ ...b, turns: (Number(b.turns) || 0) - 1 }))
-    .filter((b) => b.turns > 0);
+    .filter((b) => {
+      const isActive = b.turns > 0;
+      if (!isActive) expired.push({ type: b.type });
+      return isActive;
+    });
+  return { active, expired };
 }
 
 function checkEffectChance(skill) {
@@ -185,13 +211,29 @@ function checkEffectChance(skill) {
   return Math.random() * 100 < Math.max(0, Math.min(100, chance));
 }
 
+function getEffectCategory(effectType) {
+  if (!effectType) return null;
+  return (effectType.endsWith('_up') || effectType.endsWith('_down'))
+    ? 'buff'
+    : 'status';
+}
+
 function applySkillEffect({ attacker, target, skill }) {
   if (!skill || !target || !skill.effect_type) return null;
-  if (!checkEffectChance(skill)) return null;
 
   const effectType = skill.effect_type;
   const value = Number(skill.effect_value) || 0;
   const duration = Math.max(1, Math.floor(Number(skill.effect_duration) || 1));
+  if (!checkEffectChance(skill)) {
+    return {
+      type: effectType,
+      value,
+      turns: duration,
+      category: getEffectCategory(effectType),
+      applied: false,
+      attempted: true,
+    };
+  }
 
   if (effectType === 'poison') {
     const applied = applyStatusEffect(target, {
@@ -200,23 +242,93 @@ function applySkillEffect({ attacker, target, skill }) {
       value,
       sourceAttack: getEffectiveStat(attacker, 'attack', attacker.buffs || []),
     });
-    return applied ? effectType : null;
+    return {
+      type: effectType,
+      value,
+      turns: duration,
+      category: 'status',
+      applied: !!applied,
+      attempted: true,
+    };
   }
 
   if (effectType.endsWith('_up') || effectType.endsWith('_down')) {
     target.buffs = applyBuff(target.buffs || [], effectType, value, duration);
-    return effectType;
+    return {
+      type: effectType,
+      value,
+      turns: duration,
+      category: 'buff',
+      applied: true,
+      attempted: true,
+    };
   }
 
-  return null;
+  return {
+    type: effectType,
+    value,
+    turns: duration,
+    category: 'status',
+    applied: false,
+    attempted: true,
+  };
+}
+
+function getEffectApplyMessage(targetName, effectType, applied) {
+  if (!targetName) return null;
+  if (!applied) return `${targetName} には効かなかった！`;
+  const formatter = EFFECT_APPLY_MESSAGES[effectType];
+  if (typeof formatter === 'function') return formatter(targetName);
+  // eslint-disable-next-line no-console
+  console.warn(`[battle] 未定義の状態異常付与メッセージ: ${effectType}`);
+  return `${targetName} に効果が現れた！`;
+}
+
+function getEffectExpireMessage(targetName, effectType) {
+  if (!targetName) return null;
+  const formatter = EFFECT_EXPIRE_MESSAGES[effectType];
+  if (typeof formatter === 'function') return formatter(targetName);
+  return `${targetName} の${effectType}が解除された！`;
+}
+
+function pushEffectAction({
+  actions,
+  actorType,
+  actorId,
+  targetId,
+  targetName,
+  effectResult,
+}) {
+  if (!effectResult || !effectResult.attempted) return;
+  actions.push({
+    actorType,
+    actorId,
+    actionType: 'status_effect',
+    targetId,
+    skillName: null,
+    specialSkill: false,
+    damage: 0,
+    heal: 0,
+    statusEffect: effectResult.type || null,
+    statusEffectCategory: effectResult.category || null,
+    statusEffectTurns: Number(effectResult.turns) || 0,
+    statusEffectValue: Number(effectResult.value) || 0,
+    statusEffectApplied: !!effectResult.applied,
+    removedEffects: [],
+    isCrit: false,
+    isSupercrit: false,
+    missed: false,
+    message: getEffectApplyMessage(targetName, effectResult.type, !!effectResult.applied),
+  });
 }
 
 function processEndOfTurn(combatant, actorType, actions) {
   const combatantId = combatant.instance_id || combatant.id;
-  combatant.buffs = tickBuffs(combatant.buffs || []);
-  const statusEvents = processStatusEffectTick(combatant);
+  const { active, expired } = tickBuffs(combatant.buffs || []);
+  combatant.buffs = active;
+  const { damageEvents, expiredEffects } = processStatusEffectTick(combatant);
 
-  for (const ev of statusEvents) {
+  for (const ev of damageEvents) {
     actions.push({
       actorType: 'system',
       actorId: null,
@@ -230,9 +342,37 @@ function processEndOfTurn(combatant, actorType, actions) {
       isCrit: false,
       isSupercrit: false,
       missed: false,
-      message: `${combatant.name} は ${STATUS_LABELS[ev.type] || ev.type} のダメージ ${ev.damage}！`,
+      message: ev.type === STATUS_TYPES.POISON
+        ? `${combatant.name} は毒のダメージを受けた！（${ev.damage}）`
+        : `${combatant.name} は ${STATUS_LABELS[ev.type] || ev.type} のダメージ ${ev.damage}！`,
+      removedEffects: [],
+      statusEffectApplied: false,
     });
   }
+
+  const removedEffects = [
+    ...expired.map((e) => ({ type: e.type, category: 'buff' })),
+    ...expiredEffects.map((e) => ({ type: e.type, category: 'status' })),
+  ];
+  removedEffects.forEach((entry) => {
+    actions.push({
+      actorType: 'system',
+      actorId: null,
+      actionType: 'status_expired',
+      targetId: combatantId,
+      skillName: null,
+      specialSkill: false,
+      damage: 0,
+      heal: 0,
+      statusEffect: null,
+      isCrit: false,
+      isSupercrit: false,
+      missed: false,
+      statusEffectApplied: false,
+      removedEffects: [entry],
+      message: getEffectExpireMessage(combatant.name, entry.type),
+    });
+  });
 
   if (combatant.hp <= 0 && actorType === 'monster' && !combatant.escaped) {
     actions.push({
@@ -398,27 +538,27 @@ function processTurn(battleState, playerAction) {
                   message: '対象がいない！',
                 });
               } else {
-                let statusEffect = null;
-                if (actualSkill.skill_type === 'buff' || actualSkill.skill_type === 'debuff') {
-                  target.buffs = applyBuff(
-                    target.buffs || [],
-                    actualSkill.effect_type,
-                    Number(actualSkill.effect_value) || 0,
-                    actualSkill.effect_duration || 1
-                  );
-                  statusEffect = actualSkill.effect_type;
-                } else {
-                  statusEffect = applySkillEffect({ attacker: player, target, skill: actualSkill });
-                }
+                const effectResult = applySkillEffect({ attacker: player, target, skill: actualSkill });
                 actions.push({
                   actorType: 'player', actorId: player.id,
                   actionType: 'skill', targetId,
                   skillName: actualSkill.name,
                   specialSkill: !!actualSkill.is_special,
-                  damage: 0, heal: 0, statusEffect,
+                  damage: 0, heal: 0, statusEffect: null,
                   isCrit: false, isSupercrit: false, missed: false,
-                  message: `${player.name} は ${actualSkill.name} を使った！`,
+                  removedEffects: [],
+                  statusEffectApplied: false,
+                  message: effectResult && effectResult.attempted
+                    ? getEffectApplyMessage(target.name, effectResult.type, effectResult.applied)
+                    : `${player.name} は ${actualSkill.name} を使った！`,
                 });
+                if (effectResult && effectResult.attempted) {
+                  actions[actions.length - 1].statusEffect = effectResult.type || null;
+                  actions[actions.length - 1].statusEffectCategory = effectResult.category || null;
+                  actions[actions.length - 1].statusEffectTurns = Number(effectResult.turns) || 0;
+                  actions[actions.length - 1].statusEffectValue = Number(effectResult.value) || 0;
+                  actions[actions.length - 1].statusEffectApplied = !!effectResult.applied;
+                }
               }
             } else if (actualSkill.skill_type === 'heal' && actualSkill.effect_type === 'heal_max_hp_percent') {
               const healAmount = Math.floor(player.max_hp * ((Number(actualSkill.effect_value) || 0) / 100));
@@ -442,22 +582,41 @@ function processTurn(battleState, playerAction) {
               );
               if (!missed) targetMonster.hp = Math.max(0, targetMonster.hp - damage);
 
-              const statusEffect = !missed
+              const effectResult = !missed && actualSkill.effect_type
                 ? applySkillEffect({ attacker: player, target: targetMonster, skill: actualSkill })
-                : null;
+                : (actualSkill.effect_type
+                  ? {
+                    type: actualSkill.effect_type,
+                    value: Number(actualSkill.effect_value) || 0,
+                    turns: Math.max(1, Math.floor(Number(actualSkill.effect_duration) || 1)),
+                    category: getEffectCategory(actualSkill.effect_type),
+                    applied: false,
+                    attempted: true,
+                  }
+                  : null);
 
               actions.push({
                 actorType: 'player', actorId: player.id,
                 actionType: playerAction.actionType, targetId: targetMonster.instance_id || targetMonster.id,
                 skillName: actualSkill.name,
                 specialSkill: !!actualSkill.is_special,
-                damage, heal: 0, statusEffect,
+                damage, heal: 0, statusEffect: null,
                 isCrit, isSupercrit, missed,
+                removedEffects: [],
+                statusEffectApplied: false,
                 message: actualSkill.is_special
                   ? null
                   : (missed
                     ? `${targetMonster.name} はかわした！`
                     : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
+              });
+              pushEffectAction({
+                actions,
+                actorType: 'player',
+                actorId: player.id,
+                targetId: targetMonster.instance_id || targetMonster.id,
+                targetName: targetMonster.name,
+                effectResult,
               });
 
               if (targetMonster.hp <= 0 && !targetMonster.escaped) {
@@ -541,21 +700,27 @@ function processTurn(battleState, playerAction) {
             message: `${monster.name} は ${skill.name} で ${healAmount} 回復した！`,
           });
         } else if (skill.skill_type === 'buff') {
-          monster.buffs = applyBuff(
-            monster.buffs || [],
-            skill.effect_type,
-            Number(skill.effect_value) || 0,
-            skill.effect_duration || 1
-          );
+          const effectResult = applySkillEffect({ attacker: monster, target: monster, skill });
           actions.push({
             actorType: 'monster', actorId: monster.instance_id || monster.id,
             actionType: 'skill', targetId: monster.instance_id || monster.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
-            damage: 0, heal: 0, statusEffect: skill.effect_type,
+            damage: 0, heal: 0, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
-            message: `${monster.name} は ${skill.name} を使った！`,
+            removedEffects: [],
+            statusEffectApplied: false,
+            message: effectResult && effectResult.attempted
+              ? getEffectApplyMessage(monster.name, effectResult.type, effectResult.applied)
+              : `${monster.name} は ${skill.name} を使った！`,
           });
+          if (effectResult && effectResult.attempted) {
+            actions[actions.length - 1].statusEffect = effectResult.type || null;
+            actions[actions.length - 1].statusEffectCategory = effectResult.category || null;
+            actions[actions.length - 1].statusEffectTurns = Number(effectResult.turns) || 0;
+            actions[actions.length - 1].statusEffectValue = Number(effectResult.value) || 0;
+            actions[actions.length - 1].statusEffectApplied = !!effectResult.applied;
+          }
         } else {
           const { damage, isCrit, isSupercrit, missed } = calculateDamage(
             monster,
@@ -566,22 +731,41 @@ function processTurn(battleState, playerAction) {
           );
           if (!missed) player.hp = Math.max(0, player.hp - damage);
 
-          const statusEffect = !missed
+          const effectResult = !missed && skill.effect_type
             ? applySkillEffect({ attacker: monster, target: player, skill })
-            : null;
+            : (skill.effect_type
+              ? {
+                type: skill.effect_type,
+                value: Number(skill.effect_value) || 0,
+                turns: Math.max(1, Math.floor(Number(skill.effect_duration) || 1)),
+                category: getEffectCategory(skill.effect_type),
+                applied: false,
+                attempted: true,
+              }
+              : null);
 
           actions.push({
             actorType: 'monster', actorId: monster.instance_id || monster.id,
             actionType: 'attack', targetId: player.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
-            damage, heal: 0, statusEffect,
+            damage, heal: 0, statusEffect: null,
             isCrit, isSupercrit, missed,
+            removedEffects: [],
+            statusEffectApplied: false,
             message: skill.is_special
               ? null
               : (missed
                 ? `${player.name} はかわした！`
                 : `${monster.name} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
+          });
+          pushEffectAction({
+            actions,
+            actorType: 'monster',
+            actorId: monster.instance_id || monster.id,
+            targetId: player.id,
+            targetName: player.name,
+            effectResult,
           });
 
           if (player.hp <= 0) {

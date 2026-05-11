@@ -90,27 +90,32 @@ function checkActionRestriction(combatant) {
 /**
  * ターン終了時に状態異常のダメージ処理とターン経過を行う
  * @param {object} combatant
- * @returns {Array<{type:string, damage:number, combatantId:any}>}
+ * @returns {{damageEvents:Array<{type:string, damage:number, combatantId:any}>, expiredEffects:Array<{type:string}>}}
  */
 function processStatusEffectTick(combatant) {
   if (!combatant || !Array.isArray(combatant.statusEffects) || combatant.statusEffects.length === 0) {
-    return [];
+    return { damageEvents: [], expiredEffects: [] };
   }
 
-  const events = [];
+  const damageEvents = [];
+  const expiredEffects = [];
 
   combatant.statusEffects = combatant.statusEffects.filter((e) => {
     if ((e.type === STATUS_TYPES.POISON || e.type === STATUS_TYPES.BURN) && combatant.hp > 0) {
       const dmg = Math.max(1, Number(e.damagePerTurn) || 1);
       combatant.hp = Math.max(0, combatant.hp - dmg);
-      events.push({ type: e.type, damage: dmg, combatantId: combatant.id });
+      damageEvents.push({ type: e.type, damage: dmg, combatantId: combatant.id });
     }
 
     e.turns = decrementTurns(e.turns || 1);
-    return e.turns > 0;
+    const isActive = e.turns > 0;
+    if (!isActive) {
+      expiredEffects.push({ type: e.type });
+    }
+    return isActive;
   });
 
-  return events;
+  return { damageEvents, expiredEffects };
 }
 
 module.exports = {
