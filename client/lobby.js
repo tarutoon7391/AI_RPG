@@ -1012,7 +1012,7 @@
     }
   }
 
-  function isMonsterDefeatedAction(action, battle) {
+  function isMonsterDefeatTargetAction(action, battle) {
     if (
       !action ||
       action.actionType !== 'defeated' ||
@@ -1041,11 +1041,9 @@
     if (els.enemyList) {
       els.enemyList.style.setProperty('--enemy-defeat-duration', `${DEFEAT_EFFECT_DURATION_MS}ms`);
     }
-    cards.forEach((card) => {
-      card.classList.remove('enemy-defeat-fadeout');
-      void card.offsetWidth;
-      card.classList.add('enemy-defeat-fadeout');
-    });
+    cards.forEach((card) => card.classList.remove('enemy-defeat-fadeout'));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    cards.forEach((card) => card.classList.add('enemy-defeat-fadeout'));
     await wait(DEFEAT_EFFECT_DURATION_MS);
   }
 
@@ -1185,11 +1183,11 @@
         await wait(600);
       }
 
-      if (isMonsterDefeatedAction(action, visualState)) {
+      if (isMonsterDefeatTargetAction(action, visualState)) {
         const defeatedActions = [action];
         while (
           actionIndex + 1 < actions.length &&
-          isMonsterDefeatedAction(actions[actionIndex + 1], visualState)
+          isMonsterDefeatTargetAction(actions[actionIndex + 1], visualState)
         ) {
           actionIndex += 1;
           defeatedActions.push(actions[actionIndex]);
