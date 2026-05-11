@@ -149,6 +149,13 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
   const nextHp = nextMaxHp;
   const nextMp = nextMaxMp;
 
+  // 永続ボーナス分を事前に取り出してコードの重複を避ける
+  const permAtk  = bonusGainedPerMilestone ? bonusGainedPerMilestone.attack   : 0;
+  const permDef  = bonusGainedPerMilestone ? bonusGainedPerMilestone.defense  : 0;
+  const permRec  = bonusGainedPerMilestone ? bonusGainedPerMilestone.recovery : 0;
+  const permSpd  = bonusGainedPerMilestone ? bonusGainedPerMilestone.speed    : 0;
+  const permChrm = bonusGainedPerMilestone ? bonusGainedPerMilestone.charm    : 0;
+
   await executor.query(
     `UPDATE characters
      SET hp = $2,
@@ -169,11 +176,11 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
       nextMaxHp,
       nextMp,
       nextMaxMp,
-      Math.max(0, toInt(character.attack, 0) + totalGrowth.attack + (bonusGainedPerMilestone ? bonusGainedPerMilestone.attack : 0)),
-      Math.max(0, toInt(character.defense, 0) + totalGrowth.defense + (bonusGainedPerMilestone ? bonusGainedPerMilestone.defense : 0)),
-      Math.max(0, toInt(character.recovery, 0) + totalGrowth.recovery + (bonusGainedPerMilestone ? bonusGainedPerMilestone.recovery : 0)),
-      Math.max(0, toInt(character.speed, 0) + totalGrowth.speed + (bonusGainedPerMilestone ? bonusGainedPerMilestone.speed : 0)),
-      Math.max(0, toInt(character.charm, 0) + totalGrowth.charm + (bonusGainedPerMilestone ? bonusGainedPerMilestone.charm : 0)),
+      Math.max(0, toInt(character.attack, 0) + totalGrowth.attack + permAtk),
+      Math.max(0, toInt(character.defense, 0) + totalGrowth.defense + permDef),
+      Math.max(0, toInt(character.recovery, 0) + totalGrowth.recovery + permRec),
+      Math.max(0, toInt(character.speed, 0) + totalGrowth.speed + permSpd),
+      Math.max(0, toInt(character.charm, 0) + totalGrowth.charm + permChrm),
       JSON.stringify(newPermanentBonus),
     ]
   );

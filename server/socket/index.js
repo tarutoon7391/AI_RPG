@@ -453,10 +453,10 @@ async function finalizeBattleResult({
         ...nextCharacter,
         id: nextCharacter.id || battleState.player.id,
         name: nextCharacter.name || battleState.player.name,
-        // applyBattleRewards でHP/MPは既に全回復済みのためDBから取得した値を使う
-        hp: toInt(nextCharacter.max_hp || nextCharacter.hp || battleState.player.max_hp),
+        // applyBattleRewards でHP/MPは既に全回復済みのためDBから取得したmax値を使う
+        hp: toInt(nextCharacter.max_hp || battleState.player.max_hp),
         max_hp: toInt(nextCharacter.max_hp || battleState.player.max_hp),
-        mp: toInt(nextCharacter.max_mp || nextCharacter.mp || battleState.player.max_mp),
+        mp: toInt(nextCharacter.max_mp || battleState.player.max_mp),
         max_mp: toInt(nextCharacter.max_mp || battleState.player.max_mp),
         skills: nextCharacter.skills || battleState.player.skills,
       },

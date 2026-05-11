@@ -573,9 +573,9 @@
 
     // 各ステータスのボーナス表示ヘルパー
     function renderStatWithBonus(valueEl, equipBonusEl, permBonusEl, baseVal, equipBonus, permBonus) {
-      // 基本ステータス = DBの値 - 永続ボーナス（永続ボーナスを除いた純粋な成長分）
-      const pureBase = Math.max(0, baseVal - permBonus);
-      valueEl.textContent = String(pureBase);
+      // 成長ステータス = DBの値 - 永続ボーナス（永続ボーナスを除いた通常成長分）
+      const growthStat = Math.max(0, baseVal - permBonus);
+      valueEl.textContent = String(growthStat);
       if (equipBonusEl) {
         if (equipBonus > 0) {
           equipBonusEl.textContent = `(+${equipBonus})`;
@@ -700,7 +700,7 @@
     state.save.character.lastGrowthJobName = currentJobName;
     persistSave();
     const line = `HP +${toInt(growth.hp, 0)} / 攻撃力 +${toInt(growth.attack, 0)} / 防御力 +${toInt(growth.defense, 0)} / MP +${toInt(growth.mp, 0)} / 素早さ +${toInt(growth.speed, 0)} / 回復力 +${toInt(growth.recovery, 0)} / 魅力度 +${toInt(growth.charm, 0)}`;
-    const permNote = '※ 5レベルアップごとに、現在の職業の成長値と同じ量の永続ボーナスが付与されます';
+    const permNote = '※ 5レベルごとに、現在の職業の成長値と同じ量の永続ボーナスが付与されます';
     const permNote2 = '永続ボーナスは転職後も引き継がれます';
     showModal(`${currentJobName}の成長値（1レベルあたり）\n${line}\n\n${permNote}\n${permNote2}`);
   }
