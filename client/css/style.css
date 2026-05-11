@@ -268,6 +268,7 @@ button.secondary,
   height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .battle-layout {
@@ -277,16 +278,19 @@ button.secondary,
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 70%;
+  flex: 1;
+  min-height: 0;
 }
 
 .enemy-area {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   padding: 10px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
+  overflow-y: auto;
 }
 
 .enemy-list {
@@ -294,6 +298,7 @@ button.secondary,
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-content: flex-start;
   align-items: flex-start;
   justify-content: space-evenly;
 }
@@ -366,8 +371,12 @@ button.secondary,
 
 @media (max-width: 420px) {
   .enemy-card {
-    flex: 1 1 100%;
-    max-width: none;
+    flex: 1 1 calc(50% - 10px);
+    min-width: 120px;
+  }
+
+  .enemy-card-visual {
+    height: 64px;
   }
 }
 
@@ -415,6 +424,7 @@ button.secondary,
   gap: 8px;
   padding: 10px;
   background: #121f2f;
+  flex-shrink: 0;
 }
 
 .cmd-btn {
@@ -584,6 +594,10 @@ button.secondary,
   margin-left: 4px;
   color: #4caf50;
   font-size: 0.85em;
+}
+
+.bonus-equip.negative {
+  color: #ff6b6b;
 }
 
 .bonus-perm {
