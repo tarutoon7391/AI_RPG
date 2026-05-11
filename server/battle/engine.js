@@ -212,6 +212,7 @@ function checkEffectChance(skill) {
 }
 
 function getEffectCategory(effectType) {
+  if (!effectType) return null;
   return effectType && (effectType.endsWith('_up') || effectType.endsWith('_down'))
     ? 'buff'
     : 'status';
@@ -278,6 +279,8 @@ function getEffectApplyMessage(targetName, effectType, applied) {
   if (!applied) return `${targetName} には効かなかった！`;
   const formatter = EFFECT_APPLY_MESSAGES[effectType];
   if (typeof formatter === 'function') return formatter(targetName);
+  // eslint-disable-next-line no-console
+  console.warn(`[battle] 未定義の状態異常付与メッセージ: ${effectType}`);
   return `${targetName} に効果が現れた！`;
 }
 

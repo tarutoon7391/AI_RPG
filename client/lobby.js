@@ -855,8 +855,9 @@
   }
 
   function upsertEffectEntry(entries, next) {
-    if (!Array.isArray(entries) || !next || !next.type) return entries;
-    const filtered = entries.filter((e) => e && e.type !== next.type);
+    const baseEntries = Array.isArray(entries) ? entries : [];
+    if (!next || !next.type) return baseEntries;
+    const filtered = baseEntries.filter((e) => e && e.type !== next.type);
     filtered.push({
       type: next.type,
       turns: Number(next.turns) || 1,
@@ -1149,7 +1150,7 @@
     els.enemyList.textContent = '';
     state.enemyUiMap = new Map();
     const enemyCount = (monsters || []).filter(Boolean).length;
-    els.enemyList.classList.toggle('single', enemyCount <= 1);
+    els.enemyList.classList.toggle('single', enemyCount === 1);
     const nameMap = buildEnemyNameMap(monsters);
     (monsters || []).forEach((enemy) => {
       if (!enemy) return;
