@@ -124,6 +124,7 @@ async function applyBattleRewards(userId, rewards) {
         levelBefore: progress.levelBefore,
         levelAfter: progress.levelAfter,
         learnedSkillNames: (progress.newlyLearnedSkills || []).map((s) => s.name),
+        statGrowth: progress.statGrowth || null,
       };
     }
 
@@ -202,6 +203,44 @@ function toLabelSuffix(index) {
     n = Math.floor(n / 26) - 1;
   } while (n >= 0);
   return result;
+}
+
+function toUpperAlphabetLabel(index) {
+  let n = Math.max(0, Number(index) || 0);
+  let result = '';
+  do {
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return result;
+}
+
+function buildMonsterNameMap(monsters) {
+  const grouped = {};
+  (monsters || []).forEach((monster) => {
+    if (!monster || !monster.name) return;
+    grouped[monster.name] = grouped[monster.name] || [];
+    grouped[monster.name].push(monster);
+  });
+  const nameMap = new Map();
+  Object.entries(grouped).forEach(([name, list]) => {
+    if (list.length <= 1) {
+      nameMap.set(String(list[0].instance_id || list[0].id), name);
+      return;
+    }
+    list.forEach((monster, idx) => {
+      nameMap.set(String(monster.instance_id || monster.id), `${name}${toUpperAlphabetLabel(idx)}`);
+    });
+  });
+  return nameMap;
+}
+
+function formatMonsterNames(monsters) {
+  const nameMap = buildMonsterNameMap(monsters);
+  return (monsters || [])
+    .filter(Boolean)
+    .map((monster) => nameMap.get(String(monster.instance_id || monster.id)) || monster.name)
+    .filter(Boolean);
 }
 
 async function pickMonster(dungeonId, floor, options = {}) {
@@ -292,10 +331,9 @@ function getBattleEndMessage(result) {
 }
 
 function buildBattleVictoryMessage(monsters, rewards) {
-  const names = (monsters || [])
-    .filter((m) => m && m.hp <= 0 && !m.escaped)
-    .map((m) => m.name)
-    .filter(Boolean);
+  const defeatedMonsters = (monsters || [])
+    .filter((m) => m && m.hp <= 0 && !m.escaped);
+  const names = formatMonsterNames(defeatedMonsters);
   const enemyLabel = names.length ? names.join('、') : '敵';
   return `${enemyLabel} を倒した！ 経験値 ${rewards.exp} 獲得！ ${rewards.money}G 獲得！`;
 }
@@ -394,7 +432,7 @@ async function finalizeBattleResult({
       state: getBattleState(nextBattleState),
       playerSkills: nextBattleState.player.skills || [],
       previousVictoryLog: buildBattleVictoryMessage(battleState.monsters, rewards),
-      message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`,
+      message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${formatMonsterNames(monsters).join('、')} が現れた！`,
       awaitingPlayerAction: playerActsFirst,
     });
 
@@ -550,8 +588,8 @@ function registerSocketHandlers(io) {
           state: getBattleState(battleState),
           playerSkills: character.skills,
           message: Number(safeDungeonId) === 1
-            ? `第1戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`
-            : `${monsters.map((m) => m.name).join('、')} が現れた！`,
+            ? `第1戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${formatMonsterNames(monsters).join('、')} が現れた！`
+            : `${formatMonsterNames(monsters).join('、')} が現れた！`,
           awaitingPlayerAction: playerActsFirst,
         });
 
