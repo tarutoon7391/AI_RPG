@@ -969,7 +969,9 @@
     closeMiniPopup();
     hideSkillModal();
     state.resumeFromBackground = state.activeBattleTurn;
-    releasePendingWaits();
+    if (state.activeBattleTurn) {
+      releasePendingWaits();
+    }
     if (state.socket && !state.socket.connected) {
       state.socket.connect();
     }
@@ -1009,7 +1011,7 @@
   }
 
   function releasePendingWaits() {
-    Array.from(state.pendingWaits || []).forEach((entry) => entry?.finish?.());
+    Array.from(state.pendingWaits || []).forEach((entry) => entry.finish());
   }
 
   function queueBattleTask(task, onError) {
@@ -1132,12 +1134,16 @@
     return [entry?.visual, entry?.hpText, entry?.card].filter(Boolean);
   }
 
-  function removeEnemyCards(targetIds) {
-    const ids = Array.from(new Set(
+  function normalizeEnemyTargetIds(targetIds) {
+    return Array.from(new Set(
       (targetIds || [])
-        .map((targetId) => String(targetId || ''))
+        .map((targetId) => (targetId === null || targetId === undefined ? '' : String(targetId)))
         .filter(Boolean)
     ));
+  }
+
+  function removeEnemyCards(targetIds) {
+    const ids = normalizeEnemyTargetIds(targetIds);
     ids.forEach((targetId) => {
       const entry = getEnemyUiEntry(targetId);
       if (entry?.card) {
@@ -1273,10 +1279,9 @@
             actionIndex += 1;
             defeatedActions.push(actions[actionIndex]);
           }
-          const defeatedIds = defeatedActions
-            .map((defeatedAction) => defeatedAction?.targetId)
-            .filter((targetId) => targetId !== null && targetId !== undefined)
-            .map((targetId) => String(targetId));
+          const defeatedIds = normalizeEnemyTargetIds(
+            defeatedActions.map((defeatedAction) => defeatedAction?.targetId)
+          );
           defeatedActions.forEach((defeatedAction) => applyActionToBattleState(visualState, defeatedAction));
           state.battleState = visualState;
           setCommandEnabled(false);
@@ -1439,6 +1444,10 @@
     return hasStatusEffect(entity, 'poison');
   }
 
+  function isVisibleEnemy(enemy) {
+    return !!enemy && enemy.isAlive !== false;
+  }
+
   function ratio(value, max) {
     if (!max || max <= 0) return 0;
     return Math.max(0, Math.min(1, value / max));
@@ -1489,7 +1498,7 @@
 
   function renderEnemyList(monsters) {
     if (!els.enemyList) return;
-    const visibleMonsters = (monsters || []).filter((enemy) => enemy && enemy.isAlive !== false);
+    const visibleMonsters = (monsters || []).filter(isVisibleEnemy);
     els.enemyList.textContent = '';
     state.enemyUiMap = new Map();
     const enemyCount = visibleMonsters.length;
