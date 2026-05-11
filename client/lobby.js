@@ -964,7 +964,7 @@
     setCommandEnabled(false);
   }
 
-  function recoverBattleUiFromVisibilityChange() {
+  function handleVisibilityChange() {
     if (document.hidden || !state.battleState) return;
     closeMiniPopup();
     hideSkillModal();
@@ -1011,7 +1011,7 @@
   }
 
   function releasePendingWaits() {
-    Array.from(state.pendingWaits || []).forEach((entry) => entry.finish());
+    Array.from(state.pendingWaits).forEach((entry) => entry.finish());
   }
 
   function queueBattleTask(task, onError) {
@@ -1207,6 +1207,7 @@
     );
     if (!targetMonster) return;
     if (action.actionType === 'defeated') {
+      // 撃破確定時だけ isAlive を落とし、直前のダメージ反映中はカードを残してフェードアウトにつなげる
       targetMonster.hp = 0;
       targetMonster.isAlive = false;
       return;
@@ -1445,6 +1446,7 @@
   }
 
   function isVisibleEnemy(enemy) {
+    // 旧データ互換のため、isAlive が未定義の敵は表示対象として扱う
     return !!enemy && enemy.isAlive !== false;
   }
 
@@ -1939,7 +1941,7 @@
       closeMiniPopup();
     });
 
-    document.addEventListener('visibilitychange', recoverBattleUiFromVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('resize', closeMiniPopup);
     window.addEventListener('scroll', closeMiniPopup, true);
   }
