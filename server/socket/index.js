@@ -291,7 +291,7 @@ function getBattleEndMessage(result) {
   return '戦闘終了';
 }
 
-function buildEncounterVictoryMessage(monsters, rewards) {
+function buildBattleVictoryMessage(monsters, rewards) {
   const names = (monsters || [])
     .filter((m) => m && m.hp <= 0 && !m.escaped)
     .map((m) => m.name)
@@ -388,17 +388,17 @@ async function finalizeBattleResult({
       encounterIndex: nextEncounterIndex,
     });
 
-    const awaitingPlayerAction = !isEnemyActingFirst(nextBattleState);
+    const playerActsFirst = !isEnemyActingFirst(nextBattleState);
     socket.emit('battle:start', {
       turn: nextBattleState.turn,
       state: getBattleState(nextBattleState),
       playerSkills: nextBattleState.player.skills || [],
-      previousVictoryLog: buildEncounterVictoryMessage(battleState.monsters, rewards),
+      previousVictoryLog: buildBattleVictoryMessage(battleState.monsters, rewards),
       message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`,
-      awaitingPlayerAction,
+      awaitingPlayerAction: playerActsFirst,
     });
 
-    if (!awaitingPlayerAction) {
+    if (!playerActsFirst) {
       const enemyOpening = processTurn(nextBattleState, null, { mode: 'enemy_only' });
       socket.emit('battle:turn', {
         turn: nextBattleState.turn,
@@ -435,7 +435,7 @@ async function finalizeBattleResult({
       ? rewardResult.skills
       : battleState.player.skills || [],
     levelUp: rewardResult ? rewardResult.levelUp : null,
-    victoryMessage: result === 'win' ? buildEncounterVictoryMessage(battleState.monsters, rewards) : null,
+    victoryMessage: result === 'win' ? buildBattleVictoryMessage(battleState.monsters, rewards) : null,
   };
 
   if (result === 'escape') {
@@ -544,7 +544,7 @@ function registerSocketHandlers(io) {
           totalMoney: 0,
         });
 
-        const awaitingPlayerAction = !isEnemyActingFirst(battleState);
+        const playerActsFirst = !isEnemyActingFirst(battleState);
         socket.emit('battle:start', {
           turn: battleState.turn,
           state: getBattleState(battleState),
@@ -552,10 +552,10 @@ function registerSocketHandlers(io) {
           message: Number(safeDungeonId) === 1
             ? `第1戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`
             : `${monsters.map((m) => m.name).join('、')} が現れた！`,
-          awaitingPlayerAction,
+          awaitingPlayerAction: playerActsFirst,
         });
 
-        if (!awaitingPlayerAction) {
+        if (!playerActsFirst) {
           const enemyOpening = processTurn(battleState, null, { mode: 'enemy_only' });
           socket.emit('battle:turn', {
             turn: battleState.turn,

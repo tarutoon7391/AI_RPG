@@ -69,6 +69,8 @@
   const POPUP_HEIGHT_BUFFER = 200;
   const POPUP_WIDTH_BUFFER = 270;
   const POPUP_MIN_MARGIN = 8;
+  const DEFAULT_ACTION_DELAY_MS = 700;
+  const DEFEAT_LOG_DELAY_MS = 1000;
   const EFFECT_ICON_MAP = {
     poison: '🟣',
     speed_up: '⚡',
@@ -1045,9 +1047,9 @@
 
       await playDamageEffect(action);
       if (action.actionType === 'defeated') {
-        await wait(1000);
+        await wait(DEFEAT_LOG_DELAY_MS);
       } else {
-        await wait(700);
+        await wait(DEFAULT_ACTION_DELAY_MS);
       }
     }
 
