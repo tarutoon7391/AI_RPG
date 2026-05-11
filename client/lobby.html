@@ -157,6 +157,16 @@
 
   <div id="mini-popup" class="mini-popup hidden" role="menu" aria-hidden="true"></div>
 
+  <div id="battle-result-overlay" class="battle-result-overlay hidden" role="dialog" aria-modal="true">
+    <div class="battle-result-card">
+      <h2 id="battle-result-title" class="battle-result-title"></h2>
+      <p id="battle-result-subtitle" class="battle-result-subtitle"></p>
+      <p id="battle-result-exp" class="battle-result-line"></p>
+      <p id="battle-result-gold" class="battle-result-line"></p>
+      <button id="battle-result-lobby-btn" type="button">ロビーに戻る</button>
+    </div>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="/lobby.js"></script>
 </body>

@@ -503,6 +503,49 @@ button.secondary,
   padding: 14px;
 }
 
+.battle-result-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(7, 13, 20, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.battle-result-card {
+  width: min(360px, 100%);
+  background: #121f2f;
+  border: 1px solid #2a3b54;
+  border-radius: 12px;
+  padding: 18px 16px;
+  text-align: center;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.battle-result-title {
+  margin: 0 0 10px;
+  font-size: 32px;
+  color: #ffd24a;
+}
+
+.battle-result-subtitle {
+  margin: 0 0 10px;
+  color: #c9d9ea;
+}
+
+.battle-result-line {
+  margin: 6px 0;
+  color: #e6eef6;
+  font-weight: 700;
+}
+
+#battle-result-lobby-btn {
+  margin-top: 14px;
+  width: 100%;
+}
+
 .skill-list {
   display: grid;
   gap: 8px;

@@ -408,9 +408,22 @@ function resolveBattleEnd(monsters) {
   return allEscaped ? 'enemy_escape' : null;
 }
 
-function processTurn(battleState, playerAction) {
+function isEnemyActingFirst(battleState) {
+  const player = battleState?.player;
+  const aliveMonsters = getAliveMonsters(battleState?.monsters || []);
+  if (!player || aliveMonsters.length === 0) return false;
+  const playerSpeed = getEffectiveStat(player, 'speed', player.buffs || []);
+  const fastestEnemySpeed = aliveMonsters.reduce(
+    (max, monster) => Math.max(max, getEffectiveStat(monster, 'speed', monster.buffs || [])),
+    0
+  );
+  return fastestEnemySpeed > playerSpeed;
+}
+
+function processTurn(battleState, playerAction, options = {}) {
   const { player, monsters } = battleState;
   const aliveMonsters = getAliveMonsters(monsters);
+  const mode = options.mode || 'full';
 
   if (aliveMonsters.length === 0) {
     return { actions: [], state: getBattleState(battleState), battleOver: true, result: 'win' };
@@ -420,7 +433,7 @@ function processTurn(battleState, playerAction) {
   let battleOver = false;
   let result = null;
 
-  if (playerAction.actionType === 'escape') {
+  if ((mode === 'full' || mode === 'player_only') && playerAction?.actionType === 'escape') {
     const enemySpeed = getEffectiveStat(aliveMonsters[0], 'speed', aliveMonsters[0].buffs || []);
     const playerSpeed = getEffectiveStat(player, 'speed', player.buffs || []);
     const escapeChance = Math.min(90, 30 + (playerSpeed - enemySpeed) * 2);
@@ -458,9 +471,12 @@ function processTurn(battleState, playerAction) {
 
   for (const participant of participants) {
     if (battleOver) break;
+    if (mode === 'enemy_only' && participant.type === 'player') continue;
+    if (mode === 'player_only' && participant.type === 'monster') continue;
 
     if (participant.type === 'player') {
       if (player.hp <= 0) continue;
+      if (!playerAction) continue;
       if (playerAction.actionType === 'escape') {
         processEndOfTurn(player, 'player', actions);
         if (player.hp <= 0) {
@@ -812,7 +828,9 @@ function processTurn(battleState, playerAction) {
     }
   }
 
-  battleState.turn += 1;
+  if (mode !== 'enemy_only') {
+    battleState.turn += 1;
+  }
 
   return {
     actions,
@@ -886,6 +904,7 @@ function calculateRewards(monsters, floor) {
 
 module.exports = {
   processTurn,
+  isEnemyActingFirst,
   getBattleState,
   calculateRewards,
   calculateDamage,
