@@ -343,6 +343,10 @@ button.secondary,
 .bar-label {
   font-size: 12px;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .bar-bg {
@@ -390,8 +394,14 @@ button.secondary,
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 6px;
-  min-height: 18px;
+  margin-top: 0;
+  min-height: 0;
+}
+
+.hp-status-icons {
+  margin-left: auto;
+  justify-content: flex-end;
+  white-space: nowrap;
 }
 
 .status-icon {
