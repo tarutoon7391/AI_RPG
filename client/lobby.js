@@ -200,6 +200,12 @@
     backToHomeBtn: document.getElementById('back-to-home-btn'),
     commandButtons: document.querySelectorAll('.cmd-btn'),
     miniPopup: document.getElementById('mini-popup'),
+    battleResultOverlay: document.getElementById('battle-result-overlay'),
+    battleResultTitle: document.getElementById('battle-result-title'),
+    battleResultSubtitle: document.getElementById('battle-result-subtitle'),
+    battleResultExp: document.getElementById('battle-result-exp'),
+    battleResultGold: document.getElementById('battle-result-gold'),
+    battleResultLobbyBtn: document.getElementById('battle-result-lobby-btn'),
   };
 
   function cloneDefaultSave() {
@@ -664,6 +670,35 @@
     els.skillList.textContent = '';
   }
 
+  function hideBattleResultOverlay() {
+    els.battleResultOverlay.classList.add('hidden');
+  }
+
+  function returnToLobbyFromBattle() {
+    hideBattleResultOverlay();
+    setBattleVisible(false);
+    state.battleState = null;
+    state.waitingAction = false;
+    state.pendingBattleEnd = false;
+    setCommandEnabled(false);
+    setActiveTab('adventure');
+  }
+
+  function showBattleResultOverlay(result, payload = {}) {
+    const totals = payload.cumulativeRewards || { exp: 0, money: 0 };
+    if (result === 'win') {
+      els.battleResultTitle.textContent = 'ダンジョンクリア！';
+      els.battleResultSubtitle.textContent = '';
+    } else {
+      const reached = toInt(payload.reachedEncounter, 1);
+      els.battleResultTitle.textContent = '敗北...';
+      els.battleResultSubtitle.textContent = `${reached}戦目で敗北`;
+    }
+    els.battleResultExp.textContent = `総経験値: ${toInt(totals.exp, 0)}`;
+    els.battleResultGold.textContent = `総ゴールド: ${toInt(totals.money, 0)}G`;
+    els.battleResultOverlay.classList.remove('hidden');
+  }
+
   function setActiveTab(tab) {
     closeMiniPopup();
     els.tabs.forEach((btn) => {
@@ -735,11 +770,13 @@
       state.battleSessionId = nextSessionId;
       closeMiniPopup();
       hideSkillModal();
+      hideBattleResultOverlay();
       state.turnSequence = Promise.resolve().then(() => {
         if (nextSessionId !== state.battleSessionId) return;
         state.battleState = data.state || null;
         state.playerSkills = data.playerSkills || [];
-        state.waitingAction = true;
+        const awaitingPlayerAction = data.awaitingPlayerAction !== false;
+        state.waitingAction = awaitingPlayerAction;
         state.pendingBattleEnd = false;
         if (state.battleState && Number(state.battleState.dungeonId) === 1) {
           state.save.progress.beginnerMeadowEncounterIndex = toInt(state.battleState.encounterIndex, 0);
@@ -747,8 +784,14 @@
           persistSave();
         }
         updateBattleState();
-        setCommandEnabled(true);
+        setCommandEnabled(awaitingPlayerAction);
+        if (typeof data.previousVictoryLog === 'string' && data.previousVictoryLog) {
+          addBattleLog(data.previousVictoryLog);
+        }
         addBattleLog(data.message || 'バトル開始');
+        if (awaitingPlayerAction) {
+          addBattleLog('あなたのターン');
+        }
         setBattleVisible(true);
       });
     });
@@ -798,6 +841,7 @@
     state.characterData = null;
     state.battleSessionId = 0;
     closeMiniPopup();
+    hideBattleResultOverlay();
     disconnectSocket();
     setBattleVisible(false);
     setCommandEnabled(false);
@@ -1000,7 +1044,11 @@
       updateBattleState();
 
       await playDamageEffect(action);
-      await wait(700);
+      if (action.actionType === 'defeated') {
+        await wait(1000);
+      } else {
+        await wait(700);
+      }
     }
 
     if (sessionId !== state.battleSessionId) return;
@@ -1008,9 +1056,12 @@
     updateBattleState();
 
     if (!isBattleContinuable()) return;
-    addBattleLog('あなたのターン');
-    state.waitingAction = true;
-    setCommandEnabled(true);
+    const awaitingPlayerAction = data.awaitingPlayerAction !== false;
+    state.waitingAction = awaitingPlayerAction;
+    if (awaitingPlayerAction) {
+      addBattleLog('あなたのターン');
+    }
+    setCommandEnabled(awaitingPlayerAction);
   }
 
   async function processBattleEnd(data, sessionId) {
@@ -1018,6 +1069,8 @@
     state.pendingBattleEnd = true;
     state.waitingAction = false;
     setCommandEnabled(false);
+    closeMiniPopup();
+    hideSkillModal();
     addBattleLog(data.message || '戦闘終了');
     if (Array.isArray(data.playerSkills)) {
       state.playerSkills = data.playerSkills;
@@ -1035,12 +1088,18 @@
         addBattleLog(`スキル習得: ${name}`);
       });
     }
-    if (data.result === 'win' && data.rewards) {
+    if (data.result === 'win' && data.victoryMessage) {
+      addBattleLog(data.victoryMessage);
+    } else if (data.result === 'win' && data.rewards) {
       addBattleLog(`経験値 +${data.rewards.exp} / お金 +${data.rewards.money}`);
-      await loadCharacterProfile();
     }
+    if (data.result === 'win') await loadCharacterProfile();
     state.save.progress.beginnerMeadowEncounterIndex = 0;
     persistSave();
+    if (data.result === 'win' || data.result === 'lose') {
+      showBattleResultOverlay(data.result, data);
+      return;
+    }
     addBattleLog('「冒険へ戻る」を押すとダンジョン一覧に戻ります。');
   }
 
@@ -1270,7 +1329,7 @@
       addBattleLog('対象となるモンスターがいません');
       return;
     }
-    if (aliveEnemies.length === 1 || !state.save.battle.targetSelectionEnabled) {
+    if (aliveEnemies.length === 1) {
       emitBattleAction(actionType, skillId, aliveEnemies[0].id);
       return;
     }
@@ -1295,7 +1354,8 @@
         const mpCost = skill.mp_cost > 0 ? `（MP${skill.mp_cost}）` : '';
         button.type = 'button';
         button.textContent = `${skill.name}${mpCost}`;
-        button.addEventListener('click', () => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
           hideSkillModal();
           requestBattleAction('skill', skill.id, els.commandButtons[1] || els.skillList);
         });
@@ -1308,10 +1368,12 @@
     els.battleView.classList.toggle('hidden', !visible);
     els.homeView.classList.toggle('hidden', visible);
     els.tabBar.classList.toggle('hidden', visible);
+    if (visible) hideBattleResultOverlay();
   }
 
   async function requestBattleStart() {
     if (!state.socket) return;
+    hideBattleResultOverlay();
     els.battleLog.textContent = '';
     addBattleLog('はじまりの草原に入った。');
     addBattleLog('モンスターを探しています...');
@@ -1554,7 +1616,8 @@
     });
 
     els.commandButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
         if (!state.waitingAction) return;
         const cmd = btn.dataset.command;
         if (cmd === 'skill') {
@@ -1569,13 +1632,8 @@
       });
     });
 
-    els.backToHomeBtn.addEventListener('click', () => {
-      setBattleVisible(false);
-      state.battleState = null;
-      state.waitingAction = false;
-      setCommandEnabled(false);
-      setActiveTab('adventure');
-    });
+    els.backToHomeBtn.addEventListener('click', returnToLobbyFromBattle);
+    els.battleResultLobbyBtn.addEventListener('click', returnToLobbyFromBattle);
 
     document.addEventListener('click', (e) => {
       if (els.miniPopup.classList.contains('hidden')) return;

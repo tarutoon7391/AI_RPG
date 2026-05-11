@@ -18,7 +18,12 @@
 //     - player:left         : プレイヤー退出通知
 
 const db = require('../db');
-const { processTurn, getBattleState, calculateRewards } = require('../battle/engine');
+const {
+  processTurn,
+  getBattleState,
+  calculateRewards,
+  isEnemyActingFirst,
+} = require('../battle/engine');
 const {
   ensureLearnedSkillsUpToLevel,
   fetchLearnedSkills,
@@ -286,6 +291,162 @@ function getBattleEndMessage(result) {
   return '戦闘終了';
 }
 
+function buildEncounterVictoryMessage(monsters, rewards) {
+  const names = (monsters || [])
+    .filter((m) => m && m.hp <= 0 && !m.escaped)
+    .map((m) => m.name)
+    .filter(Boolean);
+  const enemyLabel = names.length ? names.join('、') : '敵';
+  return `${enemyLabel} を倒した！ 経験値 ${rewards.exp} 獲得！ ${rewards.money}G 獲得！`;
+}
+
+async function finalizeBattleResult({
+  socket,
+  userId,
+  battleState,
+  result,
+}) {
+  const rewards = result === 'win'
+    ? calculateRewards(battleState.monsters, battleState.floor)
+    : { exp: 0, money: 0 };
+
+  let rewardResult = null;
+  if (result === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
+    try {
+      rewardResult = await applyBattleRewards(userId, rewards);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[socket] 報酬更新エラー:', err);
+    }
+  }
+
+  const runState = activeDungeonRuns.get(socket.id);
+  const baseRun = runState || {
+    dungeonId: battleState.dungeonId,
+    floor: battleState.floor,
+    encounterIndex: battleState.encounterIndex || 0,
+    encounterTotal: battleState.encounterTotal || 1,
+    totalExp: 0,
+    totalMoney: 0,
+  };
+  if (result === 'win') {
+    baseRun.totalExp = (Number(baseRun.totalExp) || 0) + rewards.exp;
+    baseRun.totalMoney = (Number(baseRun.totalMoney) || 0) + rewards.money;
+    activeDungeonRuns.set(socket.id, baseRun);
+  }
+
+  const shouldAdvanceEncounter = result === 'win'
+    && baseRun
+    && Number(baseRun.dungeonId) === 1
+    && baseRun.encounterIndex + 1 < BEGINNER_MEADOW_ENCOUNTER_TOTAL;
+
+  if (shouldAdvanceEncounter) {
+    const nextEncounterIndex = baseRun.encounterIndex + 1;
+    const monsters = await buildEncounterMonsters(baseRun.dungeonId, nextEncounterIndex, baseRun.floor);
+    if (!monsters.length) {
+      activeBattles.delete(socket.id);
+      activeDungeonRuns.delete(socket.id);
+      socket.emit('battle:end', {
+        result: 'win',
+        rewards,
+        cumulativeRewards: { exp: baseRun.totalExp, money: baseRun.totalMoney },
+        message: '次の戦闘生成に失敗したため終了しました',
+        playerSkills: rewardResult && Array.isArray(rewardResult.skills)
+          ? rewardResult.skills
+          : battleState.player.skills || [],
+        levelUp: rewardResult ? rewardResult.levelUp : null,
+        reachedEncounter: nextEncounterIndex,
+      });
+      return;
+    }
+
+    const refreshedCharacter = await loadCharacter(userId);
+    if (refreshedCharacter) {
+      battleState.player.skills = refreshedCharacter.skills || battleState.player.skills;
+    }
+    const nextBattleState = createBattleState({
+      dungeonId: baseRun.dungeonId,
+      floor: baseRun.floor,
+      encounterIndex: nextEncounterIndex,
+      monsters,
+      character: {
+        ...battleState.player,
+        id: battleState.player.id,
+        name: battleState.player.name,
+        hp: Math.max(0, battleState.player.hp),
+        max_hp: battleState.player.max_hp,
+        mp: Math.max(0, battleState.player.mp),
+        max_mp: battleState.player.max_mp,
+        skills: battleState.player.skills,
+      },
+    });
+    nextBattleState.player.buffs = [];
+    nextBattleState.player.statusEffects = [];
+    activeBattles.set(socket.id, nextBattleState);
+    activeDungeonRuns.set(socket.id, {
+      ...baseRun,
+      encounterIndex: nextEncounterIndex,
+    });
+
+    const awaitingPlayerAction = !isEnemyActingFirst(nextBattleState);
+    socket.emit('battle:start', {
+      turn: nextBattleState.turn,
+      state: getBattleState(nextBattleState),
+      playerSkills: nextBattleState.player.skills || [],
+      previousVictoryLog: buildEncounterVictoryMessage(battleState.monsters, rewards),
+      message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`,
+      awaitingPlayerAction,
+    });
+
+    if (!awaitingPlayerAction) {
+      const enemyOpening = processTurn(nextBattleState, null, { mode: 'enemy_only' });
+      socket.emit('battle:turn', {
+        turn: nextBattleState.turn,
+        actions: enemyOpening.actions,
+        state: enemyOpening.state,
+        awaitingPlayerAction: !enemyOpening.battleOver,
+      });
+      if (enemyOpening.battleOver) {
+        await finalizeBattleResult({
+          socket,
+          userId,
+          battleState: nextBattleState,
+          result: enemyOpening.result,
+        });
+      }
+    }
+    return;
+  }
+
+  activeBattles.delete(socket.id);
+  activeDungeonRuns.delete(socket.id);
+  const endPayload = {
+    result,
+    rewards,
+    cumulativeRewards: {
+      exp: Number(baseRun.totalExp) || 0,
+      money: Number(baseRun.totalMoney) || 0,
+    },
+    reachedEncounter: (Number(baseRun.encounterIndex) || 0) + 1,
+    message: result === 'win' && Number(baseRun.dungeonId) === 1
+      ? 'はじまりの草原を踏破した！'
+      : getBattleEndMessage(result),
+    playerSkills: rewardResult && Array.isArray(rewardResult.skills)
+      ? rewardResult.skills
+      : battleState.player.skills || [],
+    levelUp: rewardResult ? rewardResult.levelUp : null,
+    victoryMessage: result === 'win' ? buildEncounterVictoryMessage(battleState.monsters, rewards) : null,
+  };
+
+  if (result === 'escape') {
+    socket.emit('battle:end', endPayload);
+  } else {
+    setTimeout(() => {
+      socket.emit('battle:end', endPayload);
+    }, BATTLE_END_DELAY);
+  }
+}
+
 function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
     const session = socket.request.session;
@@ -379,8 +540,11 @@ function registerSocketHandlers(io) {
           floor: safeFloor,
           encounterIndex,
           encounterTotal: battleState.encounterTotal,
+          totalExp: 0,
+          totalMoney: 0,
         });
 
+        const awaitingPlayerAction = !isEnemyActingFirst(battleState);
         socket.emit('battle:start', {
           turn: battleState.turn,
           state: getBattleState(battleState),
@@ -388,7 +552,26 @@ function registerSocketHandlers(io) {
           message: Number(safeDungeonId) === 1
             ? `第1戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`
             : `${monsters.map((m) => m.name).join('、')} が現れた！`,
+          awaitingPlayerAction,
         });
+
+        if (!awaitingPlayerAction) {
+          const enemyOpening = processTurn(battleState, null, { mode: 'enemy_only' });
+          socket.emit('battle:turn', {
+            turn: battleState.turn,
+            actions: enemyOpening.actions,
+            state: enemyOpening.state,
+            awaitingPlayerAction: !enemyOpening.battleOver,
+          });
+          if (enemyOpening.battleOver) {
+            await finalizeBattleResult({
+              socket,
+              userId,
+              battleState,
+              result: enemyOpening.result,
+            });
+          }
+        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[socket] battle:startRequest エラー:', err);
@@ -425,110 +608,57 @@ function registerSocketHandlers(io) {
         skill,
       };
 
-      const { actions, state, battleOver, result } = processTurn(battleState, playerAction);
+      const enemyFirst = isEnemyActingFirst(battleState);
+      if (enemyFirst) {
+        const playerResult = processTurn(battleState, playerAction, { mode: 'player_only' });
+        socket.emit('battle:turn', {
+          turn: battleState.turn,
+          actions: playerResult.actions,
+          state: playerResult.state,
+          awaitingPlayerAction: false,
+        });
 
-      socket.emit('battle:turn', {
-        turn: battleState.turn,
-        actions,
-        state,
-      });
-
-      if (battleOver) {
-        const rewards = result === 'win'
-          ? calculateRewards(battleState.monsters, battleState.floor)
-          : { exp: 0, money: 0 };
-
-        let rewardResult = null;
-        if (result === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
-          try {
-            rewardResult = await applyBattleRewards(userId, rewards);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error('[socket] 報酬更新エラー:', err);
-          }
+        if (playerResult.battleOver) {
+          await finalizeBattleResult({
+            socket,
+            userId,
+            battleState,
+            result: playerResult.result,
+          });
+          if (typeof ack === 'function') ack({ ok: true });
+          return;
         }
 
-        const runState = activeDungeonRuns.get(socket.id);
-        const shouldAdvanceEncounter = result === 'win'
-          && runState
-          && Number(runState.dungeonId) === 1
-          && runState.encounterIndex + 1 < BEGINNER_MEADOW_ENCOUNTER_TOTAL;
-
-        if (shouldAdvanceEncounter) {
-          const nextEncounterIndex = runState.encounterIndex + 1;
-          const monsters = await buildEncounterMonsters(runState.dungeonId, nextEncounterIndex, runState.floor);
-          if (!monsters.length) {
-            activeBattles.delete(socket.id);
-            activeDungeonRuns.delete(socket.id);
-            socket.emit('battle:end', {
-              result: 'win',
-              rewards,
-              message: '次の戦闘生成に失敗したため終了しました',
-              playerSkills: rewardResult && Array.isArray(rewardResult.skills)
-                ? rewardResult.skills
-                : battleState.player.skills || [],
-              levelUp: rewardResult ? rewardResult.levelUp : null,
-            });
-            if (typeof ack === 'function') ack({ ok: true });
-            return;
-          }
-
-          const refreshedCharacter = await loadCharacter(userId);
-          if (refreshedCharacter) {
-            battleState.player.skills = refreshedCharacter.skills || battleState.player.skills;
-          }
-          const nextBattleState = createBattleState({
-            dungeonId: runState.dungeonId,
-            floor: runState.floor,
-            encounterIndex: nextEncounterIndex,
-            monsters,
-            character: {
-              ...battleState.player,
-              id: battleState.player.id,
-              name: battleState.player.name,
-              hp: Math.max(0, battleState.player.hp),
-              max_hp: battleState.player.max_hp,
-              mp: Math.max(0, battleState.player.mp),
-              max_mp: battleState.player.max_mp,
-              skills: battleState.player.skills,
-            },
+        const enemyResult = processTurn(battleState, null, { mode: 'enemy_only' });
+        socket.emit('battle:turn', {
+          turn: battleState.turn,
+          actions: enemyResult.actions,
+          state: enemyResult.state,
+          awaitingPlayerAction: !enemyResult.battleOver,
+        });
+        if (enemyResult.battleOver) {
+          await finalizeBattleResult({
+            socket,
+            userId,
+            battleState,
+            result: enemyResult.result,
           });
-          nextBattleState.player.buffs = [];
-          nextBattleState.player.statusEffects = [];
-          activeBattles.set(socket.id, nextBattleState);
-          activeDungeonRuns.set(socket.id, {
-            ...runState,
-            encounterIndex: nextEncounterIndex,
+        }
+      } else {
+        const turnResult = processTurn(battleState, playerAction);
+        socket.emit('battle:turn', {
+          turn: battleState.turn,
+          actions: turnResult.actions,
+          state: turnResult.state,
+          awaitingPlayerAction: !turnResult.battleOver,
+        });
+        if (turnResult.battleOver) {
+          await finalizeBattleResult({
+            socket,
+            userId,
+            battleState,
+            result: turnResult.result,
           });
-
-          socket.emit('battle:start', {
-            turn: nextBattleState.turn,
-            state: getBattleState(nextBattleState),
-            playerSkills: nextBattleState.player.skills || [],
-            message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${monsters.map((m) => m.name).join('、')} が現れた！`,
-          });
-        } else {
-          activeBattles.delete(socket.id);
-          activeDungeonRuns.delete(socket.id);
-          const endPayload = {
-            result,
-            rewards,
-            message: result === 'win' && runState && Number(runState.dungeonId) === 1
-              ? 'はじまりの草原を踏破した！'
-              : getBattleEndMessage(result),
-            playerSkills: rewardResult && Array.isArray(rewardResult.skills)
-              ? rewardResult.skills
-              : battleState.player.skills || [],
-            levelUp: rewardResult ? rewardResult.levelUp : null,
-          };
-
-          if (result === 'escape') {
-            socket.emit('battle:end', endPayload);
-          } else {
-            setTimeout(() => {
-              socket.emit('battle:end', endPayload);
-            }, BATTLE_END_DELAY);
-          }
         }
       }
 
