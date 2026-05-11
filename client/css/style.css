@@ -285,50 +285,90 @@ button.secondary,
   padding: 10px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
 }
 
-.enemy-name {
-  color: #ff6b6b;
-  font-weight: 700;
-  margin-bottom: 8px;
+.enemy-list {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-evenly;
 }
 
-.enemy-visual {
-  width: 120px;
+.enemy-list.single {
+  justify-content: center;
+}
+
+.enemy-card {
+  flex: 1 1 180px;
+  max-width: 260px;
+  min-width: 160px;
+  border: 1px solid #39506b;
+  border-radius: 8px;
+  padding: 8px;
+  background: #162536;
+  display: grid;
+  gap: 6px;
+}
+
+.enemy-card.defeated {
+  opacity: 0.55;
+}
+
+.enemy-card-name {
+  color: #ffa7b0;
+  font-weight: 700;
+  text-align: center;
+}
+
+.enemy-card-visual {
+  width: 100%;
   height: 80px;
   border: 2px solid #ff6b6b;
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 10px;
   color: #ff9f9f;
+  background: rgba(255, 107, 107, 0.08);
 }
 
-.enemy-list {
-  width: 100%;
-  display: grid;
-  gap: 6px;
-  margin-bottom: 10px;
+.enemy-card-hp-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
 }
 
-.enemy-item {
-  border: 1px solid #39506b;
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: #162536;
+.enemy-card-hp-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.enemy-card-hp-text {
+  margin-bottom: 4px;
   font-size: 12px;
 }
 
-.enemy-item.defeated {
-  opacity: 0.55;
+.enemy-card-effects {
+  min-width: 0;
+  flex-shrink: 0;
 }
 
-.enemy-item-name {
-  color: #ff8f8f;
-  font-weight: 700;
+@media (max-width: 640px) {
+  .enemy-card {
+    flex: 1 1 calc(50% - 10px);
+    min-width: 140px;
+  }
+}
+
+@media (max-width: 420px) {
+  .enemy-card {
+    flex: 1 1 100%;
+    max-width: none;
+  }
 }
 
 .player-area {

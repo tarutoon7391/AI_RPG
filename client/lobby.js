@@ -72,9 +72,11 @@
   const EFFECT_ICON_MAP = {
     poison: '🟣',
     speed_up: '⚡',
-    speed_down: '⚡',
+    speed_down: '⬇️',
     defense_up: '🛡️',
     attack_up: '⚔️',
+    defense_down: '🛡️',
+    attack_down: '⚔️',
     sleep: '💤',
   };
   const EFFECT_NAME_MAP = {
@@ -83,6 +85,8 @@
     speed_down: '素早さダウン',
     defense_up: '防御アップ',
     attack_up: '攻撃アップ',
+    defense_down: '防御ダウン',
+    attack_down: '攻撃ダウン',
     sleep: '眠り',
   };
 
@@ -124,6 +128,7 @@
     pendingBattleEnd: false,
     pendingAction: null,
     battleSessionId: 0,
+    enemyUiMap: new Map(),
   };
 
   const els = {
@@ -184,12 +189,7 @@
     skillModal: document.getElementById('skill-modal'),
     skillList: document.getElementById('skill-list'),
     skillCancel: document.getElementById('skill-cancel'),
-    enemyName: document.getElementById('enemy-name'),
-    enemyVisual: document.getElementById('enemy-visual'),
     enemyList: document.getElementById('enemy-list'),
-    enemyHpText: document.getElementById('enemy-hp-text'),
-    enemyHpBar: document.getElementById('enemy-hp-bar'),
-    enemyEffects: document.getElementById('enemy-effects'),
     playerName: document.getElementById('player-name'),
     playerEffects: document.getElementById('player-effects'),
     playerHpText: document.getElementById('player-hp-text'),
@@ -755,12 +755,26 @@
 
     state.socket.on('battle:turn', (data) => {
       const sessionId = state.battleSessionId;
-      state.turnSequence = state.turnSequence.then(() => processBattleTurn(data, sessionId));
+      state.turnSequence = state.turnSequence
+        .then(() => processBattleTurn(data, sessionId))
+        .catch((err) => {
+          console.error('[battle:turn] 処理失敗:', err);
+          addBattleLog('バトル処理でエラーが発生しました');
+          if (isBattleContinuable()) {
+            state.waitingAction = true;
+            setCommandEnabled(true);
+          }
+        });
     });
 
     state.socket.on('battle:end', (data) => {
       const sessionId = state.battleSessionId;
-      state.turnSequence = state.turnSequence.then(() => processBattleEnd(data, sessionId));
+      state.turnSequence = state.turnSequence
+        .then(() => processBattleEnd(data, sessionId))
+        .catch((err) => {
+          console.error('[battle:end] 処理失敗:', err);
+          addBattleLog('終了処理でエラーが発生しました');
+        });
     });
 
     state.socket.on('battle:error', (data) => {
@@ -817,8 +831,10 @@
 
   async function playDamageEffect(action) {
     if (!action || action.missed || !action.damage || action.damage <= 0) return;
-    if (action.actorType === 'player') {
-      await playShake([els.enemyVisual, els.enemyHpText], 'shake-target');
+    const isPlayerTarget = String(action.targetId) === String(state.battleState?.player?.id);
+    const enemyTargets = getEnemyShakeTargets(action.targetId);
+    if (action.actorType === 'player' && !isPlayerTarget) {
+      await playShake(enemyTargets, 'shake-target');
       return;
     }
     if (action.actorType === 'monster') {
@@ -833,9 +849,40 @@
       if (isPlayer) {
         await playShake([els.playerHpText], 'shake-target');
       } else {
-        await playShake([els.enemyVisual, els.enemyHpText], 'shake-target');
+        await playShake(enemyTargets, 'shake-target');
       }
     }
+  }
+
+  function upsertEffectEntry(entries, next) {
+    if (!Array.isArray(entries) || !next || !next.type) return entries;
+    const filtered = entries.filter((e) => e && e.type !== next.type);
+    filtered.push({
+      type: next.type,
+      turns: Number(next.turns) || 1,
+      value: Number(next.value) || 0,
+    });
+    return filtered;
+  }
+
+  function removeEffectEntries(entries, removeTypes) {
+    if (!Array.isArray(entries)) return [];
+    const removeSet = new Set((removeTypes || []).map((type) => String(type)));
+    if (removeSet.size === 0) return entries;
+    return entries.filter((entry) => entry && !removeSet.has(String(entry.type)));
+  }
+
+  function getEnemyUiEntry(targetId) {
+    const id = String(targetId || '');
+    if (!id || !(state.enemyUiMap instanceof Map)) return null;
+    return state.enemyUiMap.get(id) || null;
+  }
+
+  function getEnemyShakeTargets(targetId) {
+    const aliveEnemies = getAliveEnemies();
+    const fallbackEnemy = aliveEnemies[0] || (state.battleState?.monsters || [])[0] || null;
+    const entry = getEnemyUiEntry(targetId || fallbackEnemy?.id);
+    return [entry?.visual, entry?.hpText, entry?.card].filter(Boolean);
   }
 
   function cloneBattleState(battle) {
@@ -850,12 +897,36 @@
     if (!battle || !action || action.targetId == null) return;
 
     const isPlayer = String(action.targetId) === String(battle.player?.id);
+    const removedEffects = Array.isArray(action.removedEffects) ? action.removedEffects : [];
+    const removedStatusTypes = removedEffects
+      .filter((entry) => entry && entry.category === 'status')
+      .map((entry) => entry.type);
+    const removedBuffTypes = removedEffects
+      .filter((entry) => entry && entry.category === 'buff')
+      .map((entry) => entry.type);
     if (isPlayer) {
       if (action.heal && action.heal > 0) {
         battle.player.hp = Math.min(battle.player.maxHp || battle.player.hp || 0, (battle.player.hp || 0) + action.heal);
       } else if (!action.missed && action.damage && action.damage > 0) {
         battle.player.hp = Math.max(0, (battle.player.hp || 0) - action.damage);
       }
+      if (action.statusEffectApplied && action.statusEffect) {
+        if (action.statusEffectCategory === 'status') {
+          battle.player.statusEffects = upsertEffectEntry(battle.player.statusEffects || [], {
+            type: action.statusEffect,
+            turns: action.statusEffectTurns,
+            value: action.statusEffectValue,
+          });
+        } else if (action.statusEffectCategory === 'buff') {
+          battle.player.buffs = upsertEffectEntry(battle.player.buffs || [], {
+            type: action.statusEffect,
+            turns: action.statusEffectTurns,
+            value: action.statusEffectValue,
+          });
+        }
+      }
+      battle.player.statusEffects = removeEffectEntries(battle.player.statusEffects || [], removedStatusTypes);
+      battle.player.buffs = removeEffectEntries(battle.player.buffs || [], removedBuffTypes);
       return;
     }
 
@@ -868,6 +939,23 @@
     } else if (!action.missed && action.damage && action.damage > 0) {
       targetMonster.hp = Math.max(0, (targetMonster.hp || 0) - action.damage);
     }
+    if (action.statusEffectApplied && action.statusEffect) {
+      if (action.statusEffectCategory === 'status') {
+        targetMonster.statusEffects = upsertEffectEntry(targetMonster.statusEffects || [], {
+          type: action.statusEffect,
+          turns: action.statusEffectTurns,
+          value: action.statusEffectValue,
+        });
+      } else if (action.statusEffectCategory === 'buff') {
+        targetMonster.buffs = upsertEffectEntry(targetMonster.buffs || [], {
+          type: action.statusEffect,
+          turns: action.statusEffectTurns,
+          value: action.statusEffectValue,
+        });
+      }
+    }
+    targetMonster.statusEffects = removeEffectEntries(targetMonster.statusEffects || [], removedStatusTypes);
+    targetMonster.buffs = removeEffectEntries(targetMonster.buffs || [], removedBuffTypes);
     targetMonster.isAlive = !targetMonster.escaped && targetMonster.hp > 0;
   }
 
@@ -1059,20 +1147,57 @@
   function renderEnemyList(monsters) {
     if (!els.enemyList) return;
     els.enemyList.textContent = '';
+    state.enemyUiMap = new Map();
+    const enemyCount = (monsters || []).filter(Boolean).length;
+    els.enemyList.classList.toggle('single', enemyCount <= 1);
     const nameMap = buildEnemyNameMap(monsters);
     (monsters || []).forEach((enemy) => {
       if (!enemy) return;
-      const item = document.createElement('div');
-      item.className = `enemy-item${enemy.isAlive ? '' : ' defeated'}`;
-      const hpText = `${enemy.hp ?? '---'}/${enemy.maxHp ?? '---'}`;
+      const card = document.createElement('div');
+      card.className = `enemy-card${enemy.isAlive ? '' : ' defeated'}`;
+
       const nameLine = document.createElement('div');
-      nameLine.className = 'enemy-item-name';
+      nameLine.className = 'enemy-card-name';
       nameLine.textContent = getEnemyDisplayName(enemy, nameMap);
-      const hpLine = document.createElement('div');
-      hpLine.textContent = `HP ${hpText}`;
-      item.appendChild(nameLine);
-      item.appendChild(hpLine);
-      els.enemyList.appendChild(item);
+
+      const visual = document.createElement('div');
+      visual.className = 'enemy-card-visual';
+      visual.textContent = 'ENEMY';
+
+      const hpRow = document.createElement('div');
+      hpRow.className = 'enemy-card-hp-row';
+
+      const hpMain = document.createElement('div');
+      hpMain.className = 'enemy-card-hp-main';
+      const hpText = document.createElement('div');
+      hpText.className = 'enemy-card-hp-text';
+      hpText.textContent = `HP ${enemy.hp ?? '---'}/${enemy.maxHp ?? '---'}`;
+      const barBg = document.createElement('div');
+      barBg.className = 'bar-bg';
+      const hpBar = document.createElement('div');
+      hpBar.className = 'bar hp';
+      updateBar(hpBar, enemy.hp || 0, enemy.maxHp || 1);
+      hpBar.classList.toggle('poisoned', hasPoison(enemy));
+      barBg.appendChild(hpBar);
+      hpMain.appendChild(hpText);
+      hpMain.appendChild(barBg);
+
+      const effects = document.createElement('div');
+      effects.className = 'status-icons enemy-card-effects';
+      effects.setAttribute('aria-label', '敵の状態異常・バフデバフ');
+      renderStatusIcons(effects, enemy);
+
+      hpRow.appendChild(hpMain);
+      hpRow.appendChild(effects);
+      card.appendChild(nameLine);
+      card.appendChild(visual);
+      card.appendChild(hpRow);
+      els.enemyList.appendChild(card);
+      state.enemyUiMap.set(String(enemy.id), {
+        card,
+        visual,
+        hpText,
+      });
     });
     return nameMap;
   }
@@ -1083,14 +1208,7 @@
 
     const player = battle.player || {};
     const monsters = battle.monsters || [];
-    const aliveEnemy = monsters.find((m) => m && m.isAlive) || monsters[0] || {};
-    const nameMap = renderEnemyList(monsters) || new Map();
-
-    els.enemyName.textContent = getEnemyDisplayName(aliveEnemy, nameMap);
-    els.enemyHpText.textContent = `HP ${aliveEnemy.hp ?? '---'}/${aliveEnemy.maxHp ?? '---'}`;
-    updateBar(els.enemyHpBar, aliveEnemy.hp || 0, aliveEnemy.maxHp || 1);
-    els.enemyHpBar.classList.toggle('poisoned', hasPoison(aliveEnemy));
-    renderStatusIcons(els.enemyEffects, aliveEnemy);
+    renderEnemyList(monsters);
 
     els.playerName.textContent = player.name || '---';
     els.playerHpText.textContent = `HP ${player.hp ?? '---'}/${player.maxHp ?? '---'}`;
