@@ -103,7 +103,7 @@
   };
 
   const defaultSave = {
-    version: 5,
+    version: 6,
     ui: {
       activeTab: 'adventure',
       lastScreen: 'dungeonList',
@@ -165,12 +165,22 @@
     charMp: document.getElementById('char-mp'),
     charMaxMp: document.getElementById('char-max-mp'),
     charAtk: document.getElementById('char-atk'),
+    charAtkEquip: document.getElementById('char-atk-equip'),
+    charAtkPerm: document.getElementById('char-atk-perm'),
     charDef: document.getElementById('char-def'),
+    charDefEquip: document.getElementById('char-def-equip'),
+    charDefPerm: document.getElementById('char-def-perm'),
     charRec: document.getElementById('char-rec'),
+    charRecEquip: document.getElementById('char-rec-equip'),
+    charRecPerm: document.getElementById('char-rec-perm'),
     charSpd: document.getElementById('char-spd'),
+    charSpdEquip: document.getElementById('char-spd-equip'),
+    charSpdPerm: document.getElementById('char-spd-perm'),
     charCrit: document.getElementById('char-crit'),
     charEva: document.getElementById('char-eva'),
     charCharm: document.getElementById('char-charm'),
+    charCharmEquip: document.getElementById('char-charm-equip'),
+    charCharmPerm: document.getElementById('char-charm-perm'),
     jobChangeBtn: document.getElementById('job-change-btn'),
     growthInfoBtn: document.getElementById('growth-info-btn'),
     equipHeadName: document.getElementById('equip-head-name'),
@@ -380,6 +390,7 @@
         migrated.character.lastGrowthJobName = defaults.character.lastGrowthJobName;
       }
     }
+    // v6: フィールドの存在確認のみ（新フィールドはデフォルト値で補完済み）
 
     return migrated;
   }
@@ -423,6 +434,12 @@
 
   function getBaseCharacterData() {
     const char = state.characterData || {};
+    const pb = (key) => {
+      const val = char.permanent_bonus && typeof char.permanent_bonus === 'object'
+        ? char.permanent_bonus[key]
+        : undefined;
+      return toInt(val, 0);
+    };
     return {
       name: char.name || state.user?.username || '---',
       level: toInt(char.job_level, 1),
@@ -439,6 +456,15 @@
       critRate: toRate(char.crit_rate, 0),
       evasionRate: toRate(char.evasion_rate, 0),
       charm: toInt(char.charm, 0),
+      permanentBonus: {
+        hp:       pb('hp'),
+        mp:       pb('mp'),
+        attack:   pb('attack'),
+        defense:  pb('defense'),
+        recovery: pb('recovery'),
+        speed:    pb('speed'),
+        charm:    pb('charm'),
+      },
     };
   }
 
@@ -528,6 +554,7 @@
     if (!els.characterView || state.save.ui.activeTab !== 'monsters') return;
     const base = getBaseCharacterData();
     const bonus = getTotalEquipmentBonus();
+    const perm = base.permanentBonus;
     const selectedJob = state.save.character.selectedJobName;
     const level = base.level;
     const nextExp = calcNextLevelExp(base.totalExp, level);
@@ -538,17 +565,45 @@
     els.charNextExp.textContent = String(nextExp);
     els.charGold.textContent = String(base.money);
 
+    // HP/MPは permanent_bonus が max_hp に baked-in 済み（DB値そのまま）
     els.charHp.textContent = String(Math.max(0, base.hp + bonus.hp));
     els.charMaxHp.textContent = String(Math.max(0, base.maxHp + bonus.maxHp));
     els.charMp.textContent = String(Math.max(0, base.mp + bonus.mp));
     els.charMaxMp.textContent = String(Math.max(0, base.maxMp + bonus.maxMp));
-    els.charAtk.textContent = String(Math.max(0, base.attack + bonus.attack));
-    els.charDef.textContent = String(Math.max(0, base.defense + bonus.defense));
-    els.charRec.textContent = String(Math.max(0, base.recovery + bonus.recovery));
-    els.charSpd.textContent = String(Math.max(0, base.speed + bonus.speed));
+
+    // 各ステータスのボーナス表示ヘルパー
+    function renderStatWithBonus(valueEl, equipBonusEl, permBonusEl, baseVal, equipBonus, permBonus) {
+      // 基本ステータス = DBの値 - 永続ボーナス（永続ボーナスを除いた純粋な成長分）
+      const pureBase = Math.max(0, baseVal - permBonus);
+      valueEl.textContent = String(pureBase);
+      if (equipBonusEl) {
+        if (equipBonus > 0) {
+          equipBonusEl.textContent = `(+${equipBonus})`;
+          equipBonusEl.classList.remove('hidden');
+        } else {
+          equipBonusEl.textContent = '';
+          equipBonusEl.classList.add('hidden');
+        }
+      }
+      if (permBonusEl) {
+        if (permBonus > 0) {
+          permBonusEl.textContent = `(+${permBonus})`;
+          permBonusEl.classList.remove('hidden');
+        } else {
+          permBonusEl.textContent = '';
+          permBonusEl.classList.add('hidden');
+        }
+      }
+    }
+
+    renderStatWithBonus(els.charAtk,  els.charAtkEquip,  els.charAtkPerm,  base.attack,   bonus.attack,   perm.attack);
+    renderStatWithBonus(els.charDef,  els.charDefEquip,  els.charDefPerm,  base.defense,  bonus.defense,  perm.defense);
+    renderStatWithBonus(els.charRec,  els.charRecEquip,  els.charRecPerm,  base.recovery, bonus.recovery, perm.recovery);
+    renderStatWithBonus(els.charSpd,  els.charSpdEquip,  els.charSpdPerm,  base.speed,    bonus.speed,    perm.speed);
+    renderStatWithBonus(els.charCharm, els.charCharmEquip, els.charCharmPerm, base.charm,  bonus.charm,    perm.charm);
+
     els.charCrit.textContent = formatRate(base.critRate + bonus.critRate);
     els.charEva.textContent = formatRate(base.evasionRate + bonus.evasionRate);
-    els.charCharm.textContent = String(Math.max(0, base.charm + bonus.charm));
 
     renderEquipmentRows();
   }
@@ -645,7 +700,9 @@
     state.save.character.lastGrowthJobName = currentJobName;
     persistSave();
     const line = `HP +${toInt(growth.hp, 0)} / 攻撃力 +${toInt(growth.attack, 0)} / 防御力 +${toInt(growth.defense, 0)} / MP +${toInt(growth.mp, 0)} / 素早さ +${toInt(growth.speed, 0)} / 回復力 +${toInt(growth.recovery, 0)} / 魅力度 +${toInt(growth.charm, 0)}`;
-    showModal(`${currentJobName}の成長値（1レベルあたり）\n${line}`);
+    const permNote = '※ 5レベルアップごとに、現在の職業の成長値と同じ量の永続ボーナスが付与されます';
+    const permNote2 = '永続ボーナスは転職後も引き継がれます';
+    showModal(`${currentJobName}の成長値（1レベルあたり）\n${line}\n\n${permNote}\n${permNote2}`);
   }
 
   function renderJobPopup() {
@@ -1136,13 +1193,29 @@
         const speedGain = toInt(totalGrowth.speed, 0);
         const recoveryGain = toInt(totalGrowth.recovery, 0);
         const charmGain = toInt(totalGrowth.charm, 0);
-        addBattleLog(`HP +${hpGain} / 攻撃力 +${attackGain} / 防御力 +${defenseGain} / MP +${mpGain} / 素早さ +${speedGain} / 回復力 +${recoveryGain} / 魅力度 +${charmGain}`);
+        if (hpGain || attackGain || defenseGain || mpGain || speedGain || recoveryGain || charmGain) {
+          addBattleLog(`HP +${hpGain} / 攻撃力 +${attackGain} / 防御力 +${defenseGain} / MP +${mpGain} / 素早さ +${speedGain} / 回復力 +${recoveryGain} / 魅力度 +${charmGain}`);
+        }
+        // 永続ボーナス付与があった場合の通知
+        const permBonus = getObject(data.levelUp.permanentBonusGained);
+        if (permBonus && Object.values(permBonus).some((v) => v > 0)) {
+          const pbAtk = toInt(permBonus.attack, 0);
+          const pbDef = toInt(permBonus.defense, 0);
+          const pbHp = toInt(permBonus.hp, 0);
+          const pbMp = toInt(permBonus.mp, 0);
+          const pbSpd = toInt(permBonus.speed, 0);
+          const pbRec = toInt(permBonus.recovery, 0);
+          const pbChrm = toInt(permBonus.charm, 0);
+          addBattleLog(`✨ 永続ボーナス獲得！ HP +${pbHp} / 攻撃力 +${pbAtk} / 防御力 +${pbDef} / MP +${pbMp} / 素早さ +${pbSpd} / 回復力 +${pbRec} / 魅力度 +${pbChrm}`);
+        }
+        // レベルアップ時はHP・MPが全回復する
+        addBattleLog('HPとMPが全回復した！');
       }
       const learnedSkillNames = Array.isArray(data.levelUp.learnedSkillNames)
         ? data.levelUp.learnedSkillNames.filter((x) => typeof x === 'string' && x.trim())
         : [];
       learnedSkillNames.forEach((name) => {
-        addBattleLog(`スキル習得: ${name}`);
+        addBattleLog(`スキル『${name}』を習得した！`);
       });
     }
     if (data.result === 'win' && data.victoryMessage) {

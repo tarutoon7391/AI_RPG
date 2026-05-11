@@ -1,4 +1,7 @@
 const EXP_PER_LEVEL = 100;
+// 5レベルごとに永続ボーナスを付与するインターバル
+const PERMANENT_BONUS_INTERVAL = 5;
+
 const EMPTY_GROWTH = Object.freeze({
   hp: 0,
   mp: 0,
@@ -18,6 +21,17 @@ const JOB_LEVEL_GROWTH_TABLE = Object.freeze({
   まものつかい: Object.freeze({ hp: 10, mp: 4, attack: 3, defense: 2, recovery: 2, speed: 2, charm: 5 }),
 });
 
+// 各職業のLv1基礎ステータス
+const JOB_BASE_STATS = Object.freeze({
+  戦士:       Object.freeze({ hp: 200, mp: 50,  attack: 60, defense: 50, recovery: 20, speed: 30, charm: 20 }),
+  魔法使い:   Object.freeze({ hp: 120, mp: 100, attack: 70, defense: 25, recovery: 30, speed: 35, charm: 25 }),
+  僧侶:       Object.freeze({ hp: 150, mp: 80,  attack: 40, defense: 35, recovery: 60, speed: 25, charm: 30 }),
+  盗賊:       Object.freeze({ hp: 140, mp: 60,  attack: 55, defense: 30, recovery: 20, speed: 55, charm: 35 }),
+  狩人:       Object.freeze({ hp: 140, mp: 60,  attack: 55, defense: 30, recovery: 20, speed: 50, charm: 40 }),
+  格闘家:     Object.freeze({ hp: 160, mp: 30,  attack: 75, defense: 40, recovery: 20, speed: 45, charm: 20 }),
+  まものつかい: Object.freeze({ hp: 140, mp: 70, attack: 50, defense: 30, recovery: 25, speed: 35, charm: 60 }),
+});
+
 function toInt(value, fallback = 0) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
@@ -35,6 +49,11 @@ function getGrowthByJobName(jobName) {
   return JOB_LEVEL_GROWTH_TABLE[jobName] || EMPTY_GROWTH;
 }
 
+function getBaseStatsByJobName(jobName) {
+  if (typeof jobName !== 'string') return null;
+  return JOB_BASE_STATS[jobName] || null;
+}
+
 function multiplyGrowth(baseGrowth, levelsGained) {
   const lv = Math.max(0, toInt(levelsGained, 0));
   return {
@@ -48,7 +67,35 @@ function multiplyGrowth(baseGrowth, levelsGained) {
   };
 }
 
-async function applyLevelGrowthToCharacter(executor, { characterId, jobId, levelsGained }) {
+/**
+ * 指定レベル範囲で新たに獲得する永続ボーナスのマイルストーン数を計算する
+ * @param {number} levelBefore - 上昇前レベル（1始まり）
+ * @param {number} levelAfter  - 上昇後レベル
+ * @returns {number} 新たに達成したマイルストーン数
+ */
+function countNewPermanentBonusMilestones(levelBefore, levelAfter) {
+  const milestonesAfter  = Math.floor(levelAfter  / PERMANENT_BONUS_INTERVAL);
+  const milestonesBefore = Math.floor(levelBefore / PERMANENT_BONUS_INTERVAL);
+  return Math.max(0, milestonesAfter - milestonesBefore);
+}
+
+/**
+ * permanent_bonus JSONB の値を加算して返す
+ */
+function addPermanentBonus(existing, addition) {
+  const base = existing && typeof existing === 'object' ? existing : {};
+  return {
+    hp:       (toInt(base.hp,       0) + toInt(addition.hp,       0)),
+    mp:       (toInt(base.mp,       0) + toInt(addition.mp,       0)),
+    attack:   (toInt(base.attack,   0) + toInt(addition.attack,   0)),
+    defense:  (toInt(base.defense,  0) + toInt(addition.defense,  0)),
+    recovery: (toInt(base.recovery, 0) + toInt(addition.recovery, 0)),
+    speed:    (toInt(base.speed,    0) + toInt(addition.speed,    0)),
+    charm:    (toInt(base.charm,    0) + toInt(addition.charm,    0)),
+  };
+}
+
+async function applyLevelGrowthToCharacter(executor, { characterId, jobId, levelsGained, levelBefore, levelAfter }) {
   const safeLevelsGained = Math.max(0, toInt(levelsGained, 0));
   if (!characterId || !jobId || safeLevelsGained <= 0) {
     return {
@@ -56,11 +103,14 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
       jobName: null,
       perLevel: EMPTY_GROWTH,
       total: EMPTY_GROWTH,
+      permanentBonusGained: null,
     };
   }
 
   const characterResult = await executor.query(
-    `SELECT c.hp, c.max_hp, c.mp, c.max_mp, c.attack, c.defense, c.recovery, c.speed, c.charm, j.name AS job_name
+    `SELECT c.hp, c.max_hp, c.mp, c.max_mp, c.attack, c.defense, c.recovery, c.speed, c.charm,
+            COALESCE(c.permanent_bonus, '{}')::jsonb AS permanent_bonus,
+            j.name AS job_name
      FROM characters c
      INNER JOIN jobs j ON j.id = $2
      WHERE c.id = $1
@@ -73,6 +123,7 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
       jobName: null,
       perLevel: EMPTY_GROWTH,
       total: EMPTY_GROWTH,
+      permanentBonusGained: null,
     };
   }
 
@@ -80,10 +131,23 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
   const perLevelGrowth = getGrowthByJobName(character.job_name);
   const totalGrowth = multiplyGrowth(perLevelGrowth, safeLevelsGained);
 
-  const nextMaxHp = Math.max(1, toInt(character.max_hp, 0) + totalGrowth.hp);
-  const nextMaxMp = Math.max(0, toInt(character.max_mp, 0) + totalGrowth.mp);
-  const nextHp = Math.max(0, Math.min(nextMaxHp, toInt(character.hp, 0) + totalGrowth.hp));
-  const nextMp = Math.max(0, Math.min(nextMaxMp, toInt(character.mp, 0) + totalGrowth.mp));
+  // 5レベルごとの永続ボーナスを計算
+  const safeLevelBefore = toInt(levelBefore, 1);
+  const safeLevelAfter  = toInt(levelAfter, safeLevelBefore + safeLevelsGained);
+  const newMilestones = countNewPermanentBonusMilestones(safeLevelBefore, safeLevelAfter);
+  const bonusGainedPerMilestone = newMilestones > 0 ? multiplyGrowth(perLevelGrowth, newMilestones) : null;
+
+  // 現在の永続ボーナスに加算
+  const existingBonus = character.permanent_bonus || {};
+  const newPermanentBonus = bonusGainedPerMilestone
+    ? addPermanentBonus(existingBonus, bonusGainedPerMilestone)
+    : existingBonus;
+
+  const nextMaxHp = Math.max(1, toInt(character.max_hp, 0) + totalGrowth.hp + (bonusGainedPerMilestone ? bonusGainedPerMilestone.hp : 0));
+  const nextMaxMp = Math.max(0, toInt(character.max_mp, 0) + totalGrowth.mp + (bonusGainedPerMilestone ? bonusGainedPerMilestone.mp : 0));
+  // レベルアップ時はHP・MPを最大値まで全回復する
+  const nextHp = nextMaxHp;
+  const nextMp = nextMaxMp;
 
   await executor.query(
     `UPDATE characters
@@ -96,6 +160,7 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
          recovery = $8,
          speed = $9,
          charm = $10,
+         permanent_bonus = $11::jsonb,
          updated_at = NOW()
      WHERE id = $1`,
     [
@@ -104,11 +169,12 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
       nextMaxHp,
       nextMp,
       nextMaxMp,
-      Math.max(0, toInt(character.attack, 0) + totalGrowth.attack),
-      Math.max(0, toInt(character.defense, 0) + totalGrowth.defense),
-      Math.max(0, toInt(character.recovery, 0) + totalGrowth.recovery),
-      Math.max(0, toInt(character.speed, 0) + totalGrowth.speed),
-      Math.max(0, toInt(character.charm, 0) + totalGrowth.charm),
+      Math.max(0, toInt(character.attack, 0) + totalGrowth.attack + (bonusGainedPerMilestone ? bonusGainedPerMilestone.attack : 0)),
+      Math.max(0, toInt(character.defense, 0) + totalGrowth.defense + (bonusGainedPerMilestone ? bonusGainedPerMilestone.defense : 0)),
+      Math.max(0, toInt(character.recovery, 0) + totalGrowth.recovery + (bonusGainedPerMilestone ? bonusGainedPerMilestone.recovery : 0)),
+      Math.max(0, toInt(character.speed, 0) + totalGrowth.speed + (bonusGainedPerMilestone ? bonusGainedPerMilestone.speed : 0)),
+      Math.max(0, toInt(character.charm, 0) + totalGrowth.charm + (bonusGainedPerMilestone ? bonusGainedPerMilestone.charm : 0)),
+      JSON.stringify(newPermanentBonus),
     ]
   );
 
@@ -117,6 +183,8 @@ async function applyLevelGrowthToCharacter(executor, { characterId, jobId, level
     jobName: character.job_name || null,
     perLevel: perLevelGrowth,
     total: totalGrowth,
+    permanentBonusGained: bonusGainedPerMilestone,
+    newPermanentBonus,
   };
 }
 
@@ -213,6 +281,8 @@ async function syncJobProgress(executor, { characterId, jobId, gainedExp = 0 }) 
     characterId,
     jobId,
     levelsGained,
+    levelBefore,
+    levelAfter,
   });
 
   return {
@@ -224,9 +294,79 @@ async function syncJobProgress(executor, { characterId, jobId, gainedExp = 0 }) 
   };
 }
 
+/**
+ * 転職時のステータスリセット処理
+ * - 通常ステータスを転職先のLv1基礎ステータス + 現在の永続ボーナスにリセット
+ * - HP・MPを最大値まで全回復する
+ */
+async function applyJobChangeStats(executor, { characterId, jobId }) {
+  if (!characterId || !jobId) return null;
+
+  // 現在の永続ボーナスを取得
+  const charResult = await executor.query(
+    `SELECT COALESCE(c.permanent_bonus, '{}')::jsonb AS permanent_bonus,
+            j.name AS job_name
+     FROM characters c
+     INNER JOIN jobs j ON j.id = $2
+     WHERE c.id = $1
+     LIMIT 1`,
+    [characterId, jobId]
+  );
+  if (charResult.rowCount === 0) return null;
+
+  const row = charResult.rows[0];
+  const permanentBonus = row.permanent_bonus || {};
+  const jobName = row.job_name;
+  const baseStats = getBaseStatsByJobName(jobName);
+
+  if (!baseStats) return null;
+
+  const pb = (key) => toInt(permanentBonus[key], 0);
+
+  // 転職先のLv1基礎ステータス + 永続ボーナス
+  const newMaxHp = baseStats.hp + pb('hp');
+  const newMaxMp = baseStats.mp + pb('mp');
+
+  await executor.query(
+    `UPDATE characters
+     SET max_hp   = $2,
+         hp       = $2,
+         max_mp   = $3,
+         mp       = $3,
+         attack   = $4,
+         defense  = $5,
+         recovery = $6,
+         speed    = $7,
+         charm    = $8,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [
+      characterId,
+      newMaxHp,
+      newMaxMp,
+      baseStats.attack   + pb('attack'),
+      baseStats.defense  + pb('defense'),
+      baseStats.recovery + pb('recovery'),
+      baseStats.speed    + pb('speed'),
+      baseStats.charm    + pb('charm'),
+    ]
+  );
+
+  return {
+    jobName,
+    newMaxHp,
+    newMaxMp,
+    permanentBonus,
+  };
+}
+
 module.exports = {
   calcLevelFromExp,
   ensureLearnedSkillsUpToLevel,
   fetchLearnedSkills,
   syncJobProgress,
+  applyJobChangeStats,
+  getBaseStatsByJobName,
+  JOB_BASE_STATS,
+  JOB_LEVEL_GROWTH_TABLE,
 };

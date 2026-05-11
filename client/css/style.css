@@ -578,3 +578,21 @@ button.secondary,
   60% { transform: translateX(-6px); }
   80% { transform: translateX(6px); }
 }
+
+/* 装備ボーナス（緑）・永続ボーナス（黄色）表示 */
+.bonus-equip {
+  margin-left: 4px;
+  color: #4caf50;
+  font-size: 0.85em;
+}
+
+.bonus-perm {
+  margin-left: 4px;
+  color: #ffc107;
+  font-size: 0.85em;
+}
+
+.bonus-equip.hidden,
+.bonus-perm.hidden {
+  display: none;
+}
