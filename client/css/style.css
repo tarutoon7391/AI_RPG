@@ -503,6 +503,10 @@ button.secondary,
   padding: 14px;
 }
 
+#modal-message {
+  white-space: pre-wrap;
+}
+
 .battle-result-overlay {
   position: fixed;
   inset: 0;

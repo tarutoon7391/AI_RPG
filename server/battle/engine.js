@@ -117,6 +117,43 @@ function randomChoice(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function toUpperAlphabetLabel(index) {
+  let n = Math.max(0, Number(index) || 0);
+  let result = '';
+  do {
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return result;
+}
+
+function buildMonsterLogNameMap(monsters) {
+  const grouped = {};
+  (monsters || []).forEach((monster) => {
+    if (!monster || !monster.name) return;
+    grouped[monster.name] = grouped[monster.name] || [];
+    grouped[monster.name].push(monster);
+  });
+  const result = new Map();
+  Object.entries(grouped).forEach(([name, list]) => {
+    if (list.length <= 1) {
+      result.set(String(list[0].instance_id || list[0].id), name);
+      return;
+    }
+    list.forEach((monster, idx) => {
+      result.set(String(monster.instance_id || monster.id), `${name}${toUpperAlphabetLabel(idx)}`);
+    });
+  });
+  return result;
+}
+
+function getCombatantLogName(combatant, monsterNameMap) {
+  if (!combatant) return '';
+  const id = String(combatant.instance_id || combatant.id || '');
+  if (monsterNameMap && monsterNameMap.has(id)) return monsterNameMap.get(id);
+  return combatant.name || '';
+}
+
 function getSkillByName(monster, name) {
   return (monster.skills || []).find((s) => s && s.name === name) || null;
 }
@@ -322,8 +359,9 @@ function pushEffectAction({
   });
 }
 
-function processEndOfTurn(combatant, actorType, actions) {
+function processEndOfTurn(combatant, actorType, actions, monsterNameMap) {
   const combatantId = combatant.instance_id || combatant.id;
+  const combatantName = getCombatantLogName(combatant, monsterNameMap);
   const { active, expired } = tickBuffs(combatant.buffs || []);
   combatant.buffs = active;
   const { damageEvents, expiredEffects } = processStatusEffectTick(combatant);
@@ -343,8 +381,8 @@ function processEndOfTurn(combatant, actorType, actions) {
       isSupercrit: false,
       missed: false,
       message: ev.type === STATUS_TYPES.POISON
-        ? `${combatant.name} は毒のダメージを受けた！（${ev.damage}）`
-        : `${combatant.name} は ${STATUS_LABELS[ev.type] || ev.type} のダメージ ${ev.damage}！`,
+        ? `${combatantName} は毒のダメージを受けた！（${ev.damage}）`
+        : `${combatantName} は ${STATUS_LABELS[ev.type] || ev.type} のダメージ ${ev.damage}！`,
       removedEffects: [],
       statusEffectApplied: false,
     });
@@ -370,7 +408,7 @@ function processEndOfTurn(combatant, actorType, actions) {
       missed: false,
       statusEffectApplied: false,
       removedEffects: [entry],
-      message: getEffectExpireMessage(combatant.name, entry.type),
+      message: getEffectExpireMessage(combatantName, entry.type),
     });
   });
 
@@ -388,7 +426,7 @@ function processEndOfTurn(combatant, actorType, actions) {
       isCrit: false,
       isSupercrit: false,
       missed: false,
-      message: `${combatant.name} を倒した！`,
+      message: `${combatantName} を倒した！`,
     });
   }
 }
@@ -422,6 +460,7 @@ function isEnemyActingFirst(battleState) {
 
 function processTurn(battleState, playerAction, options = {}) {
   const { player, monsters } = battleState;
+  const monsterNameMap = buildMonsterLogNameMap(monsters);
   const aliveMonsters = getAliveMonsters(monsters);
   const mode = options.mode || 'full';
 
@@ -565,7 +604,7 @@ function processTurn(battleState, playerAction, options = {}) {
                   removedEffects: [],
                   statusEffectApplied: false,
                   message: effectResult && effectResult.attempted
-                    ? getEffectApplyMessage(target.name, effectResult.type, effectResult.applied)
+                    ? getEffectApplyMessage(getCombatantLogName(target, monsterNameMap), effectResult.type, effectResult.applied)
                     : `${player.name} は ${actualSkill.name} を使った！`,
                 });
                 if (effectResult && effectResult.attempted) {
@@ -623,7 +662,7 @@ function processTurn(battleState, playerAction, options = {}) {
                 message: actualSkill.is_special
                   ? null
                   : (missed
-                    ? `${targetMonster.name} はかわした！`
+                    ? `${getCombatantLogName(targetMonster, monsterNameMap)} はかわした！`
                     : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
               });
               pushEffectAction({
@@ -631,7 +670,7 @@ function processTurn(battleState, playerAction, options = {}) {
                 actorType: 'player',
                 actorId: player.id,
                 targetId: targetMonster.instance_id || targetMonster.id,
-                targetName: targetMonster.name,
+                targetName: getCombatantLogName(targetMonster, monsterNameMap),
                 effectResult,
               });
 
@@ -642,7 +681,7 @@ function processTurn(battleState, playerAction, options = {}) {
                   skillName: null, specialSkill: false,
                   damage: 0, heal: 0, statusEffect: null,
                   isCrit: false, isSupercrit: false, missed: false,
-                  message: `${targetMonster.name} を倒した！`,
+                  message: `${getCombatantLogName(targetMonster, monsterNameMap)} を倒した！`,
                 });
               }
             }
@@ -659,7 +698,7 @@ function processTurn(battleState, playerAction, options = {}) {
         }
       }
 
-      if (player.hp > 0) processEndOfTurn(player, 'player', actions);
+      if (player.hp > 0) processEndOfTurn(player, 'player', actions, monsterNameMap);
       if (player.hp <= 0) {
         battleOver = true;
         result = 'lose';
@@ -685,7 +724,7 @@ function processTurn(battleState, playerAction, options = {}) {
           skillName: null, specialSkill: false,
           damage: 0, heal: 0, statusEffect: null,
           isCrit: false, isSupercrit: false, missed: false,
-          message: `${monster.name} は動けない！`,
+          message: `${getCombatantLogName(monster, monsterNameMap)} は動けない！`,
         });
       } else {
         const skill = selectEnemyAction(monster);
@@ -701,7 +740,7 @@ function processTurn(battleState, playerAction, options = {}) {
             specialSkill: !!skill.is_special,
             damage: 0, heal: 0, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
-            message: `${monster.name} は逃げ出した！`,
+            message: `${getCombatantLogName(monster, monsterNameMap)} は逃げ出した！`,
           });
         } else if (skill.skill_type === 'heal' && skill.effect_type === 'heal_max_hp_percent') {
           const healAmount = Math.floor(monster.max_hp * ((Number(skill.effect_value) || 0) / 100));
@@ -713,7 +752,7 @@ function processTurn(battleState, playerAction, options = {}) {
             specialSkill: !!skill.is_special,
             damage: 0, heal: healAmount, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
-            message: `${monster.name} は ${skill.name} で ${healAmount} 回復した！`,
+            message: `${getCombatantLogName(monster, monsterNameMap)} は ${skill.name} で ${healAmount} 回復した！`,
           });
         } else if (skill.skill_type === 'buff') {
           const effectResult = applySkillEffect({ attacker: monster, target: monster, skill });
@@ -727,8 +766,8 @@ function processTurn(battleState, playerAction, options = {}) {
             removedEffects: [],
             statusEffectApplied: false,
             message: effectResult && effectResult.attempted
-              ? getEffectApplyMessage(monster.name, effectResult.type, effectResult.applied)
-              : `${monster.name} は ${skill.name} を使った！`,
+              ? getEffectApplyMessage(getCombatantLogName(monster, monsterNameMap), effectResult.type, effectResult.applied)
+              : `${getCombatantLogName(monster, monsterNameMap)} は ${skill.name} を使った！`,
           });
           if (effectResult && effectResult.attempted) {
             actions[actions.length - 1].statusEffect = effectResult.type || null;
@@ -773,7 +812,7 @@ function processTurn(battleState, playerAction, options = {}) {
               ? null
               : (missed
                 ? `${player.name} はかわした！`
-                : `${monster.name} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
+                : `${getCombatantLogName(monster, monsterNameMap)} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
           });
           pushEffectAction({
             actions,
@@ -800,7 +839,7 @@ function processTurn(battleState, playerAction, options = {}) {
       }
 
       if (!battleOver && monster.hp > 0 && !monster.escaped) {
-        processEndOfTurn(monster, 'monster', actions);
+        processEndOfTurn(monster, 'monster', actions, monsterNameMap);
       }
 
       if (player.hp <= 0 && !battleOver) {

@@ -63,6 +63,7 @@
     selectedJobName: '戦士',
     beginnerJobs: BEGINNER_JOB_OPTIONS,
     jobLevels: {},
+    lastGrowthJobName: null,
     equipment: DEFAULT_EQUIPPED,
     equipmentInventory: DEFAULT_EQUIP_INVENTORY,
   };
@@ -91,9 +92,18 @@
     attack_down: '攻撃ダウン',
     sleep: '眠り',
   };
+  const JOB_GROWTH_TABLE = {
+    戦士: { hp: 15, mp: 2, attack: 4, defense: 4, recovery: 1, speed: 2, charm: 1 },
+    魔法使い: { hp: 8, mp: 8, attack: 5, defense: 2, recovery: 2, speed: 2, charm: 1 },
+    僧侶: { hp: 10, mp: 6, attack: 2, defense: 3, recovery: 5, speed: 1, charm: 2 },
+    盗賊: { hp: 10, mp: 3, attack: 3, defense: 2, recovery: 1, speed: 5, charm: 2 },
+    狩人: { hp: 10, mp: 3, attack: 3, defense: 2, recovery: 1, speed: 4, charm: 3 },
+    格闘家: { hp: 12, mp: 1, attack: 6, defense: 3, recovery: 1, speed: 3, charm: 1 },
+    まものつかい: { hp: 10, mp: 4, attack: 3, defense: 2, recovery: 2, speed: 2, charm: 5 },
+  };
 
   const defaultSave = {
-    version: 4,
+    version: 5,
     ui: {
       activeTab: 'adventure',
       lastScreen: 'dungeonList',
@@ -162,6 +172,7 @@
     charEva: document.getElementById('char-eva'),
     charCharm: document.getElementById('char-charm'),
     jobChangeBtn: document.getElementById('job-change-btn'),
+    growthInfoBtn: document.getElementById('growth-info-btn'),
     equipHeadName: document.getElementById('equip-head-name'),
     equipBodyName: document.getElementById('equip-body-name'),
     equipLegsName: document.getElementById('equip-legs-name'),
@@ -316,6 +327,9 @@
         ),
         beginnerJobs: sanitizeBeginnerJobs(characterSrc.beginnerJobs, defaults.character.beginnerJobs),
         jobLevels: getObject(characterSrc.jobLevels),
+        lastGrowthJobName: typeof characterSrc.lastGrowthJobName === 'string'
+          ? characterSrc.lastGrowthJobName
+          : defaults.character.lastGrowthJobName,
         equipment: {
           head: typeof equipmentSrc.head === 'string'
             ? equipmentSrc.head
@@ -359,6 +373,11 @@
       }
       if (typeof battleSrc.targetSelectionEnabled !== 'boolean') {
         migrated.battle.targetSelectionEnabled = defaults.battle.targetSelectionEnabled;
+      }
+    }
+    if (sourceVersion < 5) {
+      if (typeof characterSrc.lastGrowthJobName !== 'string') {
+        migrated.character.lastGrowthJobName = defaults.character.lastGrowthJobName;
       }
     }
 
@@ -601,6 +620,32 @@
     if (levelFromMap > 0) return levelFromMap;
     if (char.job_name === jobName) return toInt(char.job_level, DEFAULT_JOB_LEVEL);
     return DEFAULT_JOB_LEVEL;
+  }
+
+  function getCurrentJobName() {
+    const char = state.characterData || {};
+    if (typeof char.job_name === 'string' && char.job_name.trim()) return char.job_name.trim();
+    if (typeof state.save.character.selectedJobName === 'string' && state.save.character.selectedJobName.trim()) {
+      return state.save.character.selectedJobName.trim();
+    }
+    return '戦士';
+  }
+
+  function getJobGrowth(jobName) {
+    return getObject(JOB_GROWTH_TABLE[jobName]);
+  }
+
+  function openGrowthInfoModal() {
+    const currentJobName = getCurrentJobName();
+    const growth = getJobGrowth(currentJobName);
+    if (!Object.keys(growth).length) {
+      showModal('この職業の成長値データが見つかりません');
+      return;
+    }
+    state.save.character.lastGrowthJobName = currentJobName;
+    persistSave();
+    const line = `HP +${toInt(growth.hp, 0)} / MP +${toInt(growth.mp, 0)} / 攻撃力 +${toInt(growth.attack, 0)} / 防御力 +${toInt(growth.defense, 0)} / 回復力 +${toInt(growth.recovery, 0)} / 素早さ +${toInt(growth.speed, 0)} / 魅力度 +${toInt(growth.charm, 0)}`;
+    showModal(`${currentJobName}の成長値（1レベルあたり）\n${line}`);
   }
 
   function renderJobPopup() {
@@ -1082,6 +1127,16 @@
       const after = toInt(data.levelUp.levelAfter, before);
       if (after > before) {
         addBattleLog(`レベルアップ！ Lv${before} → Lv${after}`);
+        const growth = getObject(data.levelUp.statGrowth);
+        const totalGrowth = getObject(growth.total);
+        const hpGain = toInt(totalGrowth.hp, 0);
+        const attackGain = toInt(totalGrowth.attack, 0);
+        const defenseGain = toInt(totalGrowth.defense, 0);
+        const mpGain = toInt(totalGrowth.mp, 0);
+        const speedGain = toInt(totalGrowth.speed, 0);
+        const recoveryGain = toInt(totalGrowth.recovery, 0);
+        const charmGain = toInt(totalGrowth.charm, 0);
+        addBattleLog(`HP +${hpGain} / 攻撃力 +${attackGain} / 防御力 +${defenseGain} / MP +${mpGain} / 素早さ +${speedGain} / 回復力 +${recoveryGain} / 魅力度 +${charmGain}`);
       }
       const learnedSkillNames = Array.isArray(data.levelUp.learnedSkillNames)
         ? data.levelUp.learnedSkillNames.filter((x) => typeof x === 'string' && x.trim())
@@ -1585,6 +1640,12 @@
       }
       openJobPopup(els.jobChangeBtn);
     });
+    if (els.growthInfoBtn) {
+      els.growthInfoBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openGrowthInfoModal();
+      });
+    }
 
     els.equipSlotButtons.forEach((btn) => {
       btn.addEventListener('click', (e) => {
