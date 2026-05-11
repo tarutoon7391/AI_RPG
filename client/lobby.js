@@ -1026,14 +1026,21 @@
   }
 
   async function playEnemyDefeatEffect(actions) {
-    const cards = Array.from(
+    const targetIds = Array.from(
       new Set(
         (actions || [])
-          .map((action) => getEnemyUiEntry(action?.targetId)?.card)
-          .filter(Boolean)
+          .map((action) => action?.targetId)
+          .filter((targetId) => targetId !== null && targetId !== undefined)
+          .map((targetId) => String(targetId))
       )
     );
+    const cards = targetIds
+      .map((targetId) => getEnemyUiEntry(targetId)?.card)
+      .filter(Boolean);
     if (!cards.length) return;
+    if (els.enemyList) {
+      els.enemyList.style.setProperty('--enemy-defeat-duration', `${DEFEAT_EFFECT_DURATION_MS}ms`);
+    }
     cards.forEach((card) => {
       card.classList.remove('enemy-defeat-fadeout');
       void card.offsetWidth;

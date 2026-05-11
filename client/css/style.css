@@ -326,7 +326,7 @@ button.secondary,
 .enemy-card.enemy-defeat-fadeout {
   opacity: 1;
   pointer-events: none;
-  animation: enemy-defeat-fadeout 0.8s linear forwards;
+  animation: enemy-defeat-fadeout var(--enemy-defeat-duration, 800ms) linear forwards;
 }
 
 .enemy-card-name {
