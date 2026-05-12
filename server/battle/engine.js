@@ -183,7 +183,16 @@ function selectEnemyAction(monster) {
   }
 
   if (name === 'くさばな') {
-    return pickSkillByNames(monster, ['つるたたき', '光合成']) || skills[0] || fallback;
+    // HP50%以下かつ20%の確率でのみ光合成を使用する
+    const maxHp = Number(monster.max_hp);
+    const hpRatio = maxHp > 0 ? (Number(monster.hp) || 0) / maxHp : 1;
+    if (hpRatio <= 0.5 && Math.random() < 0.2) {
+      const photosynthesis = getSkillByName(monster, '光合成');
+      if (photosynthesis && (Number(photosynthesis.mp_cost) || 0) <= (Number(monster.mp) || 0)) {
+        return photosynthesis;
+      }
+    }
+    return getSkillByName(monster, 'つるたたき') || skills[0] || fallback;
   }
 
   if (name === 'ちびゴブリン') {
