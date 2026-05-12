@@ -572,6 +572,7 @@ function processTurn(battleState, playerAction, options = {}) {
               actorType: 'player', actorId: player.id,
               actionType: 'skip', targetId: null,
               skillName: null, specialSkill: false,
+              mpAfterAction: currentMp,
               damage: 0, heal: 0, statusEffect: null,
               isCrit: false, isSupercrit: false, missed: false,
               message: `${player.name} は MP が足りず ${actualSkill.name} を使えない！`,
