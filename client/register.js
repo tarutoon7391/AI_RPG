@@ -2,7 +2,6 @@
   const els = {
     username: document.getElementById('register-username'),
     characterName: document.getElementById('register-character-name'),
-    email: document.getElementById('register-email'),
     password: document.getElementById('register-password'),
     passwordConfirm: document.getElementById('register-password-confirm'),
     error: document.getElementById('register-error'),
@@ -28,11 +27,10 @@
 
     const username = els.username.value.trim();
     const characterName = els.characterName.value.trim();
-    const email = els.email.value.trim();
     const password = els.password.value;
     const passwordConfirm = els.passwordConfirm.value;
 
-    if (!username || !characterName || !email || !password || !passwordConfirm) {
+    if (!username || !characterName || !password || !passwordConfirm) {
       els.error.textContent = 'すべての項目を入力してください';
       return;
     }
@@ -47,7 +45,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ username, characterName, email, password }),
+        body: JSON.stringify({ username, characterName, password }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
