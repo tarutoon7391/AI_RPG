@@ -304,8 +304,9 @@
     const src = getObject(value);
     const normalized = {};
     EQUIP_SLOT_KEYS.forEach((slot) => {
-      normalized[slot] = typeof src[slot] === 'string' && src[slot].trim()
-        ? src[slot]
+      const itemId = typeof src[slot] === 'string' ? src[slot].trim() : '';
+      normalized[slot] = itemId
+        ? itemId
         : defaults[slot];
     });
     return normalized;

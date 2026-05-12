@@ -47,8 +47,9 @@ function normalizeEquippedItems(source) {
   const normalized = {};
   const base = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
   EQUIP_SLOT_KEYS.forEach((slot) => {
-    normalized[slot] = typeof base[slot] === 'string' && base[slot].trim()
-      ? base[slot]
+    const value = typeof base[slot] === 'string' ? base[slot].trim() : '';
+    normalized[slot] = value
+      ? value
       : null;
   });
   return normalized;

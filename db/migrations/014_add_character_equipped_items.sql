@@ -33,4 +33,16 @@ SET equipped_items = jsonb_build_object(
     WHEN jsonb_typeof(equipped_items->'accessory') = 'string' THEN equipped_items->>'accessory'
     ELSE NULL
   END
-);
+)
+WHERE equipped_items IS NULL
+   OR jsonb_typeof(equipped_items) <> 'object'
+   OR NOT (equipped_items ? 'head')
+   OR NOT (equipped_items ? 'body')
+   OR NOT (equipped_items ? 'legs')
+   OR NOT (equipped_items ? 'shoes')
+   OR NOT (equipped_items ? 'accessory')
+   OR jsonb_typeof(equipped_items->'head') NOT IN ('string', 'null')
+   OR jsonb_typeof(equipped_items->'body') NOT IN ('string', 'null')
+   OR jsonb_typeof(equipped_items->'legs') NOT IN ('string', 'null')
+   OR jsonb_typeof(equipped_items->'shoes') NOT IN ('string', 'null')
+   OR jsonb_typeof(equipped_items->'accessory') NOT IN ('string', 'null');
