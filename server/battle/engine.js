@@ -184,7 +184,8 @@ function selectEnemyAction(monster) {
 
   if (name === 'くさばな') {
     // HP50%以下かつ20%の確率でのみ光合成を使用する
-    const hpRatio = (Number(monster.hp) || 0) / (Number(monster.max_hp) || 1);
+    const maxHp = Number(monster.max_hp);
+    const hpRatio = maxHp > 0 ? (Number(monster.hp) || 0) / maxHp : 1;
     if (hpRatio <= 0.5 && Math.random() < 0.2) {
       const photosynthesis = getSkillByName(monster, '光合成');
       if (photosynthesis && (Number(photosynthesis.mp_cost) || 0) <= (Number(monster.mp) || 0)) {
