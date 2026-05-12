@@ -618,6 +618,11 @@ function buildRealtimeRewardActions({ battleState, triggerAction, reward }) {
   return actions;
 }
 
+function areAllMonstersDefeated(monsters) {
+  return (monsters || []).length > 0
+    && (monsters || []).every((m) => m && m.hp <= 0 && !m.escaped);
+}
+
 function applyRealtimeBattleRewards(battleState, actions) {
   if (!battleState || !Array.isArray(actions) || !actions.length) return actions;
   const rewardProgress = battleState.rewardProgress;
@@ -639,8 +644,7 @@ function applyRealtimeBattleRewards(battleState, actions) {
     const safeMoney = Math.max(0, toInt(reward.money, 0));
     rewardProgress.pendingExp += safeExp;
     rewardProgress.pendingMoney += safeMoney;
-    const allDefeated = battleMonsters.length > 0
-      && battleMonsters.every((m) => m && m.hp <= 0 && !m.escaped);
+    const allDefeated = areAllMonstersDefeated(battleMonsters);
     const shouldDistributeRewardNow = isSingleEncounter || allDefeated;
     if (!shouldDistributeRewardNow) {
       continue;
@@ -703,8 +707,7 @@ async function finalizeBattleResult({
       money: toInt(battleState.rewardProgress.pendingMoney, 0),
     }
     : { exp: 0, money: 0 };
-  const allMonstersDefeated = (battleState?.monsters || []).length > 0
-    && (battleState?.monsters || []).every((m) => m && m.hp <= 0 && !m.escaped);
+  const allMonstersDefeated = areAllMonstersDefeated(battleState?.monsters || []);
   const rewards = (result === 'win' && allMonstersDefeated)
     ? pendingRewards
     : { exp: 0, money: 0 };
