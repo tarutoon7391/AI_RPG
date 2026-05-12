@@ -41,6 +41,8 @@ const activeDungeonRuns = new Map();
 const BATTLE_END_DELAY = 300;
 const BEGINNER_MEADOW_ENCOUNTER_TOTAL = 5;
 const BEGINNER_MEADOW_BOSS_MONSTER_ID = 6;
+const BEGINNER_MEADOW_METAL_SLIME_MONSTER_ID = 5;
+const BEGINNER_MEADOW_METAL_SLIME_RATE = 5;
 const BEGINNER_MEADOW_NORMAL_MONSTER_IDS = [1, 2, 3, 4, 5];
 let monsterInstanceCounter = 0;
 
@@ -202,6 +204,9 @@ function createMonsterInstance(baseMonster, floor, instanceSuffix) {
   monster.speed = Math.ceil(monster.base_speed * mult);
   monster.crit_rate = parseFloat(monster.crit_rate) || 0;
   monster.evasion_rate = parseFloat(monster.evasion_rate) || 0;
+  monster.magicImmune = !!monster.magic_immune;
+  monster.elementImmune = !!monster.element_immune;
+  monster.expMultiplier = Math.max(1, Number(monster.exp_multiplier) || 1);
   monster.element = monster.base_element;
   monster.buffs = [];
   monster.statusEffects = [];
@@ -214,6 +219,41 @@ function createMonsterInstance(baseMonster, floor, instanceSuffix) {
 function randomFrom(list) {
   if (!Array.isArray(list) || list.length === 0) return null;
   return list[Math.floor(Math.random() * list.length)];
+}
+
+function weightedRandomFrom(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const validEntries = entries.filter((entry) => entry && Number(entry.weight) > 0);
+  if (validEntries.length === 0) return null;
+  const totalWeight = validEntries.reduce((sum, entry) => sum + Number(entry.weight), 0);
+  let threshold = Math.random() * totalWeight;
+  for (const entry of validEntries) {
+    threshold -= Number(entry.weight);
+    if (threshold <= 0) return entry.value;
+  }
+  return validEntries[validEntries.length - 1].value;
+}
+
+function pickBeginnerMeadowNormalMonsterId(excludedMonsterIds = []) {
+  const candidates = BEGINNER_MEADOW_NORMAL_MONSTER_IDS.filter((id) => !excludedMonsterIds.includes(id));
+  if (candidates.length === 0) return null;
+
+  const includesMetal = candidates.includes(BEGINNER_MEADOW_METAL_SLIME_MONSTER_ID);
+  const canApplyMetalRate = includesMetal && candidates.length > 1;
+  const weightedCandidates = candidates.map((id) => {
+    if (!canApplyMetalRate) {
+      return { value: id, weight: 100 / candidates.length };
+    }
+    if (id === BEGINNER_MEADOW_METAL_SLIME_MONSTER_ID) {
+      return { value: id, weight: BEGINNER_MEADOW_METAL_SLIME_RATE };
+    }
+    return {
+      value: id,
+      weight: (100 - BEGINNER_MEADOW_METAL_SLIME_RATE) / (candidates.length - 1),
+    };
+  });
+
+  return weightedRandomFrom(weightedCandidates);
 }
 
 function nextInstanceSuffix(prefix) {
@@ -273,10 +313,7 @@ async function pickMonster(dungeonId, floor, options = {}) {
   const isBeginnerMeadow = Number(dungeonId) === 1;
   const excludedMonsterIds = Array.isArray(options.excludedMonsterIds) ? options.excludedMonsterIds : [];
   if (isBeginnerMeadow) {
-    const candidates = BEGINNER_MEADOW_NORMAL_MONSTER_IDS.filter(
-      (id) => !excludedMonsterIds.includes(id)
-    );
-    const pickedMonsterId = randomFrom(candidates);
+    const pickedMonsterId = pickBeginnerMeadowNormalMonsterId(excludedMonsterIds);
     if (!pickedMonsterId) return null;
     const baseMonster = await fetchMonsterWithSkills(pickedMonsterId);
     return createMonsterInstance(baseMonster, floor, nextInstanceSuffix('single'));
@@ -298,8 +335,8 @@ async function buildBeginnerMeadowEncounter(encounterIndex) {
     return monster ? [monster] : [];
   }
   if (idx === 2 || idx === 3) {
-    const firstId = randomFrom(BEGINNER_MEADOW_NORMAL_MONSTER_IDS);
-    const secondId = randomFrom(BEGINNER_MEADOW_NORMAL_MONSTER_IDS);
+    const firstId = pickBeginnerMeadowNormalMonsterId();
+    const secondId = pickBeginnerMeadowNormalMonsterId();
     const bases = await Promise.all([
       fetchMonsterWithSkills(firstId),
       fetchMonsterWithSkills(secondId),

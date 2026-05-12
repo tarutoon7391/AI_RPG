@@ -94,10 +94,39 @@ function getEffectiveStat(combatant, statKey, buffs) {
   return Math.max(0, adjusted);
 }
 
+function isAttackIneffective(skill, target) {
+  const magicImmune = !!(target?.magicImmune || target?.magic_immune);
+  const elementImmune = !!(target?.elementImmune || target?.element_immune);
+  if (!magicImmune && !elementImmune) return false;
+
+  const skillType = String(skill?.skill_type || 'physical');
+  const skillElement = String(skill?.element || 'none');
+  const isPhysical = skillType === 'physical';
+  const isNonElement = skillElement === 'none';
+
+  return !(isPhysical && isNonElement);
+}
+
 function calculateDamage(attacker, skill, target, attackerBuffs, targetBuffs) {
+  if (isAttackIneffective(skill, target)) {
+    return {
+      damage: 0,
+      isCrit: false,
+      isSupercrit: false,
+      missed: false,
+      ineffective: true,
+    };
+  }
+
   const effectiveEvasion = Math.max(0, Math.min(100, getEffectiveStat(target, 'evasion_rate', targetBuffs)));
   const missed = Math.random() * 100 < effectiveEvasion;
-  if (missed) return { damage: 0, isCrit: false, isSupercrit: false, missed: true };
+  if (missed) return {
+    damage: 0,
+    isCrit: false,
+    isSupercrit: false,
+    missed: true,
+    ineffective: false,
+  };
 
   const atkPower = getEffectiveStat(attacker, 'attack', attackerBuffs);
   const defValue = getEffectiveStat(target, 'defense', targetBuffs);
@@ -109,7 +138,13 @@ function calculateDamage(attacker, skill, target, attackerBuffs, targetBuffs) {
 
   const rawDamage = atkPower * powerMultiplier * elementMult * multiplier - defValue * 0.5;
   const damage = Math.max(1, Math.floor(rawDamage));
-  return { damage, isCrit, isSupercrit, missed: false };
+  return {
+    damage,
+    isCrit,
+    isSupercrit,
+    missed: false,
+    ineffective: false,
+  };
 }
 
 function randomChoice(list) {
@@ -651,16 +686,16 @@ function processTurn(battleState, playerAction, options = {}) {
                 message: `${player.name} は ${actualSkill.name} で ${healAmount} 回復した！`,
               });
             } else {
-              const { damage, isCrit, isSupercrit, missed } = calculateDamage(
+              const { damage, isCrit, isSupercrit, missed, ineffective } = calculateDamage(
                 player,
                 actualSkill,
                 targetMonster,
                 player.buffs || [],
                 targetMonster.buffs || []
               );
-              if (!missed) targetMonster.hp = Math.max(0, targetMonster.hp - damage);
+              if (!missed && !ineffective) targetMonster.hp = Math.max(0, targetMonster.hp - damage);
 
-              const effectResult = !missed && actualSkill.effect_type
+              const effectResult = !missed && !ineffective && actualSkill.effect_type
                 ? applySkillEffect({ attacker: player, target: targetMonster, skill: actualSkill })
                 : (actualSkill.effect_type
                   ? {
@@ -685,9 +720,11 @@ function processTurn(battleState, playerAction, options = {}) {
                 statusEffectApplied: false,
                 message: actualSkill.is_special
                   ? null
-                  : (missed
+                  : (ineffective
+                    ? `${getCombatantLogName(targetMonster, monsterNameMap)} には効果がなかった！`
+                    : (missed
                     ? `${getCombatantLogName(targetMonster, monsterNameMap)} はかわした！`
-                    : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
+                    : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`)),
               });
               pushEffectAction({
                 actions,
@@ -804,16 +841,16 @@ function processTurn(battleState, playerAction, options = {}) {
             actions[actions.length - 1].statusEffectApplied = !!effectResult.applied;
           }
         } else {
-          const { damage, isCrit, isSupercrit, missed } = calculateDamage(
+          const { damage, isCrit, isSupercrit, missed, ineffective } = calculateDamage(
             monster,
             skill,
             player,
             monster.buffs || [],
             player.buffs || []
           );
-          if (!missed) player.hp = Math.max(0, player.hp - damage);
+          if (!missed && !ineffective) player.hp = Math.max(0, player.hp - damage);
 
-          const effectResult = !missed && skill.effect_type
+          const effectResult = !missed && !ineffective && skill.effect_type
             ? applySkillEffect({ attacker: monster, target: player, skill })
             : (skill.effect_type
               ? {
@@ -838,9 +875,11 @@ function processTurn(battleState, playerAction, options = {}) {
             statusEffectApplied: false,
             message: skill.is_special
               ? null
-              : (missed
+              : (ineffective
+                ? `${player.name} には効果がなかった！`
+                : (missed
                 ? `${player.name} はかわした！`
-                : `${getCombatantLogName(monster, monsterNameMap)} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`),
+                : `${getCombatantLogName(monster, monsterNameMap)} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`)),
           });
           pushEffectAction({
             actions,
@@ -962,7 +1001,11 @@ function calculateRewards(monsters, floor) {
   for (const m of monsters || []) {
     if (m.escaped) continue;
     if (m.hp > 0) continue;
-    exp += Math.floor((m.base_hp / 4 + m.base_attack / 2) * floorMult);
+    const rawExpMultiplier = Number(m.expMultiplier ?? m.exp_multiplier);
+    const expMultiplier = Number.isFinite(rawExpMultiplier) && rawExpMultiplier > 0
+      ? rawExpMultiplier
+      : 1;
+    exp += Math.floor((m.base_hp / 4 + m.base_attack / 2) * floorMult) * expMultiplier;
     money += Math.floor((m.base_hp / 8 + m.base_defense / 4) * floorMult);
   }
 
