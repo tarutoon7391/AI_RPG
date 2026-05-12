@@ -73,7 +73,9 @@
   const DEFAULT_ACTION_DELAY_MS = 700;
   const DEFEAT_EFFECT_PRE_DELAY_MS = 300;
   const DEFEAT_EFFECT_DURATION_MS = 800;
+  // 敗北演出後のログ待機（撃破）
   const DEFEAT_LOG_POST_DELAY_MS = 800;
+  // 逃走ログの待機（値は撃破と同じだが、意味を分けて管理）
   const MONSTER_ESCAPE_LOG_DELAY_MS = 800;
   const REWARD_GAIN_LOG_DELAY_MS = 600;
   const LEVEL_UP_POST_DELAY_MS = 600;

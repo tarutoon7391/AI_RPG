@@ -46,6 +46,7 @@ const BEGINNER_MEADOW_BOSS_MONSTER_ID = 6;
 const BEGINNER_MEADOW_METAL_SLIME_MONSTER_ID = 5;
 const BEGINNER_MEADOW_METAL_SLIME_RATE = 5;
 const BEGINNER_MEADOW_NORMAL_MONSTER_IDS = [1, 2, 3, 4, 5];
+// 永続ボーナス付与のレベル間隔（Lv5, Lv10, ...）
 const PERMANENT_BONUS_INTERVAL = 5;
 let monsterInstanceCounter = 0;
 
@@ -692,6 +693,7 @@ async function finalizeBattleResult({
   const rewards = (result === 'win' || result === 'enemy_escape')
     ? pendingRewards
     : { exp: 0, money: 0 };
+  // 「敵が逃走して戦闘終了」の場合も、プレイヤー死亡/逃走/離脱ではないため仮付与を確定する
 
   let rewardResult = null;
   if ((result === 'win' || result === 'enemy_escape') && userId && (rewards.exp > 0 || rewards.money > 0)) {
