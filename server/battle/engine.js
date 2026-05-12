@@ -994,7 +994,7 @@ function getBattleState(battleState) {
 }
 
 function calculateMonsterReward(monster, floor, options = {}) {
-  const includeEscaped = options.includeEscaped !== false;
+  const includeEscaped = options.includeEscaped ?? true;
   const m = monster;
   if (!m) return { exp: 0, money: 0 };
 

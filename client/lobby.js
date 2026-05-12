@@ -74,6 +74,7 @@
   const DEFEAT_EFFECT_PRE_DELAY_MS = 300;
   const DEFEAT_EFFECT_DURATION_MS = 800;
   const DEFEAT_LOG_POST_DELAY_MS = 800;
+  const MONSTER_ESCAPE_LOG_DELAY_MS = 800;
   const REWARD_GAIN_LOG_DELAY_MS = 600;
   const LEVEL_UP_POST_DELAY_MS = 600;
   const PERMANENT_BONUS_POST_DELAY_MS = 500;
@@ -797,7 +798,7 @@
 
   async function returnToLobbyFromBattle() {
     if (state.socket && state.battleState) {
-      state.socket.emit('battle:abandon');
+      state.socket.emit('battle:abandon', {}, () => {});
     }
     clearTimeout(state.battleSyncTimer);
     hideBattleResultOverlay();
@@ -1321,7 +1322,7 @@
     if (action.actionType === 'level_up_stats') return LEVEL_UP_POST_DELAY_MS;
     if (action.actionType === 'permanent_bonus_up') return PERMANENT_BONUS_POST_DELAY_MS;
     if (action.actionType === 'skill_learned') return 0;
-    if (action.actionType === 'escape' && action.actorType === 'monster') return DEFEAT_LOG_POST_DELAY_MS;
+    if (action.actionType === 'escape' && action.actorType === 'monster') return MONSTER_ESCAPE_LOG_DELAY_MS;
     return DEFAULT_ACTION_DELAY_MS;
   }
 

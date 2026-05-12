@@ -684,8 +684,8 @@ async function finalizeBattleResult({
 }) {
   const pendingRewards = battleState?.rewardProgress
     ? {
-      exp: Math.max(0, toInt(battleState.rewardProgress.pendingExp, 0)),
-      money: Math.max(0, toInt(battleState.rewardProgress.pendingMoney, 0)),
+      exp: toInt(battleState.rewardProgress.pendingExp, 0),
+      money: toInt(battleState.rewardProgress.pendingMoney, 0),
     }
     : { exp: 0, money: 0 };
   const rewards = (result === 'win' || result === 'enemy_escape')
@@ -696,6 +696,7 @@ async function finalizeBattleResult({
   if ((result === 'win' || result === 'enemy_escape') && userId && (rewards.exp > 0 || rewards.money > 0)) {
     try {
       rewardResult = await applyBattleRewards(userId, rewards);
+      // レベルアップ/習得ログは戦闘中リアルタイムで表示済みのため、battle:end では再表示しない
       if (rewardResult && rewardResult.levelUp) {
         rewardResult.levelUp = null;
       }
