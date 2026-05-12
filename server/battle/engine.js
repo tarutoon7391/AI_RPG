@@ -553,6 +553,7 @@ function processTurn(battleState, playerAction, options = {}) {
         if (playerAction.actionType === 'skill' || playerAction.actionType === 'attack') {
           const skill = playerAction.skill || NORMAL_ATTACK;
           const actualSkill = restriction.forceNormalAttack ? NORMAL_ATTACK : skill;
+          const requiredMp = Number(actualSkill.mp_cost) || 0;
 
           if (restriction.selfAttack) {
             const { damage } = calculateDamage(player, NORMAL_ATTACK, player, player.buffs || [], player.buffs || []);
@@ -565,6 +566,15 @@ function processTurn(battleState, playerAction, options = {}) {
               isCrit: false, isSupercrit: false, missed: false,
               message: `${player.name} は混乱して自分を攻撃した！ ${damage} のダメージ！`,
             });
+          } else if (playerAction.actionType === 'skill' && requiredMp > (Number(player.mp) || 0)) {
+            actions.push({
+              actorType: 'player', actorId: player.id,
+              actionType: 'skip', targetId: null,
+              skillName: null, specialSkill: false,
+              damage: 0, heal: 0, statusEffect: null,
+              isCrit: false, isSupercrit: false, missed: false,
+              message: `${player.name} は MP が足りず ${actualSkill.name} を使えない！`,
+            });
           } else if (!targetMonster) {
             actions.push({
               actorType: 'player', actorId: player.id,
@@ -575,7 +585,7 @@ function processTurn(battleState, playerAction, options = {}) {
               message: '対象がいない！',
             });
           } else {
-            player.mp = Math.max(0, player.mp - (Number(actualSkill.mp_cost) || 0));
+            player.mp = Math.max(0, player.mp - requiredMp);
 
             if (actualSkill.effect_type === 'self_hp_cost') {
               const selfCost = Math.floor(player.max_hp * ((Number(actualSkill.effect_value) || 0) / 100));
@@ -608,6 +618,7 @@ function processTurn(battleState, playerAction, options = {}) {
                   actionType: 'skill', targetId,
                   skillName: actualSkill.name,
                   specialSkill: !!actualSkill.is_special,
+                  mpAfterAction: player.mp,
                   damage: 0, heal: 0, statusEffect: null,
                   isCrit: false, isSupercrit: false, missed: false,
                   removedEffects: [],
@@ -632,6 +643,7 @@ function processTurn(battleState, playerAction, options = {}) {
                 actionType: 'heal', targetId: player.id,
                 skillName: actualSkill.name,
                 specialSkill: !!actualSkill.is_special,
+                mpAfterAction: player.mp,
                 damage: 0, heal: healAmount, statusEffect: null,
                 isCrit: false, isSupercrit: false, missed: false,
                 message: `${player.name} は ${actualSkill.name} で ${healAmount} 回復した！`,
@@ -664,6 +676,7 @@ function processTurn(battleState, playerAction, options = {}) {
                 actionType: playerAction.actionType, targetId: targetMonster.instance_id || targetMonster.id,
                 skillName: actualSkill.name,
                 specialSkill: !!actualSkill.is_special,
+                mpAfterAction: player.mp,
                 damage, heal: 0, statusEffect: null,
                 isCrit, isSupercrit, missed,
                 removedEffects: [],
@@ -747,6 +760,7 @@ function processTurn(battleState, playerAction, options = {}) {
             actionType: 'escape', targetId: null,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
+            mpAfterAction: monster.mp,
             damage: 0, heal: 0, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
             message: `${getCombatantLogName(monster, monsterNameMap)} は逃げ出した！`,
@@ -759,6 +773,7 @@ function processTurn(battleState, playerAction, options = {}) {
             actionType: 'heal', targetId: monster.instance_id || monster.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
+            mpAfterAction: monster.mp,
             damage: 0, heal: healAmount, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
             message: `${getCombatantLogName(monster, monsterNameMap)} は ${skill.name} で ${healAmount} 回復した！`,
@@ -770,6 +785,7 @@ function processTurn(battleState, playerAction, options = {}) {
             actionType: 'skill', targetId: monster.instance_id || monster.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
+            mpAfterAction: monster.mp,
             damage: 0, heal: 0, statusEffect: null,
             isCrit: false, isSupercrit: false, missed: false,
             removedEffects: [],
@@ -813,6 +829,7 @@ function processTurn(battleState, playerAction, options = {}) {
             actionType: 'attack', targetId: player.id,
             skillName: skill.name,
             specialSkill: !!skill.is_special,
+            mpAfterAction: monster.mp,
             damage, heal: 0, statusEffect: null,
             isCrit, isSupercrit, missed,
             removedEffects: [],
