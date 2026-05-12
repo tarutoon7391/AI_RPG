@@ -73,7 +73,10 @@
   const DEFAULT_ACTION_DELAY_MS = 700;
   const DEFEAT_EFFECT_PRE_DELAY_MS = 300;
   const DEFEAT_EFFECT_DURATION_MS = 800;
-  const DEFEAT_LOG_POST_DELAY_MS = 500;
+  const DEFEAT_LOG_POST_DELAY_MS = 800;
+  const REWARD_GAIN_LOG_DELAY_MS = 600;
+  const LEVEL_UP_POST_DELAY_MS = 600;
+  const PERMANENT_BONUS_POST_DELAY_MS = 500;
   const EFFECT_ICON_MAP = {
     poison: '🟣',
     speed_up: '⚡',
@@ -792,7 +795,10 @@
     els.battleResultOverlay.classList.add('hidden');
   }
 
-  function returnToLobbyFromBattle() {
+  async function returnToLobbyFromBattle() {
+    if (state.socket && state.battleState) {
+      state.socket.emit('battle:abandon');
+    }
     clearTimeout(state.battleSyncTimer);
     hideBattleResultOverlay();
     setBattleVisible(false);
@@ -801,6 +807,7 @@
     state.pendingBattleEnd = false;
     setCommandEnabled(false);
     setActiveTab('adventure');
+    await loadCharacterProfile();
   }
 
   function showBattleResultOverlay(result, payload = {}) {
@@ -940,9 +947,6 @@
         }
         updateBattleState();
         setCommandEnabled(awaitingPlayerAction);
-        if (typeof data.previousVictoryLog === 'string' && data.previousVictoryLog) {
-          addBattleLog(data.previousVictoryLog);
-        }
         addBattleLog(data.message || 'バトル開始');
         if (awaitingPlayerAction) {
           addBattleLog('あなたのターン');
@@ -1310,6 +1314,17 @@
     return playerAlive && hasAliveEnemy;
   }
 
+  function getActionPostDelayMs(action) {
+    if (!action) return DEFAULT_ACTION_DELAY_MS;
+    if (action.actionType === 'reward_gain') return REWARD_GAIN_LOG_DELAY_MS;
+    if (action.actionType === 'level_up') return 0;
+    if (action.actionType === 'level_up_stats') return LEVEL_UP_POST_DELAY_MS;
+    if (action.actionType === 'permanent_bonus_up') return PERMANENT_BONUS_POST_DELAY_MS;
+    if (action.actionType === 'skill_learned') return 0;
+    if (action.actionType === 'escape' && action.actorType === 'monster') return DEFEAT_LOG_POST_DELAY_MS;
+    return DEFAULT_ACTION_DELAY_MS;
+  }
+
   async function processBattleTurn(data, sessionId) {
     if (sessionId !== state.battleSessionId) return;
     state.activeBattleTurn = true;
@@ -1322,6 +1337,9 @@
       state.waitingAction = false;
       setCommandEnabled(false);
 
+      if (Array.isArray(data.playerSkills)) {
+        state.playerSkills = data.playerSkills;
+      }
       const actions = Array.isArray(data.actions) ? data.actions.filter(Boolean) : [];
       let enemyTurnShown = false;
 
@@ -1370,7 +1388,10 @@
         updateBattleState();
 
         await playDamageEffect(action);
-        await wait(DEFAULT_ACTION_DELAY_MS);
+        const postDelayMs = getActionPostDelayMs(action);
+        if (postDelayMs > 0) {
+          await wait(postDelayMs);
+        }
       }
 
       if (sessionId !== state.battleSessionId) return;
@@ -1439,11 +1460,6 @@
       learnedSkillNames.forEach((name) => {
         addBattleLog(`スキル『${name}』を習得した！`);
       });
-    }
-    if (data.result === 'win' && data.victoryMessage) {
-      addBattleLog(data.victoryMessage);
-    } else if (data.result === 'win' && data.rewards) {
-      addBattleLog(`経験値 +${data.rewards.exp} / お金 +${data.rewards.money}`);
     }
     if (data.result === 'win') await loadCharacterProfile();
     state.save.progress.beginnerMeadowEncounterIndex = 0;

@@ -993,22 +993,32 @@ function getBattleState(battleState) {
   };
 }
 
-function calculateRewards(monsters, floor) {
+function calculateMonsterReward(monster, floor, options = {}) {
+  const includeEscaped = options.includeEscaped !== false;
+  const m = monster;
+  if (!m) return { exp: 0, money: 0 };
+
+  if (m.escaped && !includeEscaped) return { exp: 0, money: 0 };
+  if (!m.escaped && m.hp > 0) return { exp: 0, money: 0 };
+
   const floorMult = Math.pow(1.1, (floor || 1) - 1);
+  const rawExpMultiplier = Number(m.expMultiplier ?? m.exp_multiplier);
+  const expMultiplier = Number.isFinite(rawExpMultiplier) && rawExpMultiplier > 0
+    ? rawExpMultiplier
+    : 1;
+  const exp = Math.floor((m.base_hp / 4 + m.base_attack / 2) * floorMult) * expMultiplier;
+  const money = Math.floor((m.base_hp / 8 + m.base_defense / 4) * floorMult);
+  return { exp, money };
+}
+
+function calculateRewards(monsters, floor, options = {}) {
   let exp = 0;
   let money = 0;
-
-  for (const m of monsters || []) {
-    if (m.escaped) continue;
-    if (m.hp > 0) continue;
-    const rawExpMultiplier = Number(m.expMultiplier ?? m.exp_multiplier);
-    const expMultiplier = Number.isFinite(rawExpMultiplier) && rawExpMultiplier > 0
-      ? rawExpMultiplier
-      : 1;
-    exp += Math.floor((m.base_hp / 4 + m.base_attack / 2) * floorMult) * expMultiplier;
-    money += Math.floor((m.base_hp / 8 + m.base_defense / 4) * floorMult);
+  for (const monster of monsters || []) {
+    const reward = calculateMonsterReward(monster, floor, options);
+    exp += Number(reward.exp) || 0;
+    money += Number(reward.money) || 0;
   }
-
   return { exp, money };
 }
 
@@ -1016,6 +1026,7 @@ module.exports = {
   processTurn,
   isEnemyActingFirst,
   getBattleState,
+  calculateMonsterReward,
   calculateRewards,
   calculateDamage,
   selectEnemyAction,
