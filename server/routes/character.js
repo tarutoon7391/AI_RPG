@@ -14,6 +14,7 @@ const {
 
 const router = express.Router();
 const DEFAULT_JOB_LEVEL = 1;
+const EQUIP_SLOT_KEYS = ['head', 'body', 'legs', 'shoes', 'accessory'];
 const characterJobRateLimit = createRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 30,
@@ -40,6 +41,17 @@ async function fetchJobLevelsByCharacterId(characterId) {
     acc[row.job_name] = Number.isFinite(level) && level >= 0 ? Math.round(level) : DEFAULT_JOB_LEVEL;
     return acc;
   }, {});
+}
+
+function normalizeEquippedItems(source) {
+  const normalized = {};
+  const base = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+  EQUIP_SLOT_KEYS.forEach((slot) => {
+    normalized[slot] = typeof base[slot] === 'string' && base[slot].trim()
+      ? base[slot]
+      : null;
+  });
+  return normalized;
 }
 
 // GET /api/character/me
@@ -69,6 +81,7 @@ router.get('/me', requireAuth, async (req, res) => {
     if (!char.permanent_bonus || typeof char.permanent_bonus !== 'object') {
       char.permanent_bonus = {};
     }
+    char.equipped_items = normalizeEquippedItems(char.equipped_items);
 
     // スキル一覧（現在の職業のスキル）
     await ensureLearnedSkillsUpToLevel(
@@ -173,6 +186,32 @@ router.post('/job', requireAuth, characterJobRateLimit, async (req, res) => {
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   } finally {
     client.release();
+  }
+});
+
+// POST /api/character/equipment - 装備状態保存
+router.post('/equipment', requireAuth, async (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const equippedItems = normalizeEquippedItems(payload.equipment);
+    const result = await db.query(
+      `UPDATE characters
+       SET equipped_items = $1::jsonb, updated_at = NOW()
+       WHERE user_id = $2
+       RETURNING equipped_items`,
+      [JSON.stringify(equippedItems), req.session.userId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'キャラクターが見つかりません' });
+    }
+    return res.json({
+      ok: true,
+      equipment: normalizeEquippedItems(result.rows[0].equipped_items),
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[character.equipment] エラー:', err);
+    return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
 });
 

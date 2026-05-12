@@ -196,6 +196,10 @@ router.post('/logout', (req, res) => {
   if (!req.session) {
     return res.json({ ok: true });
   }
+  delete req.session.userId;
+  delete req.session.username;
+  delete req.session.currentJobId;
+  delete req.session.equipment;
   req.session.destroy((err) => {
     if (err) {
       // eslint-disable-next-line no-console
