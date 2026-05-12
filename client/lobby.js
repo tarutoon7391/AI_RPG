@@ -1166,7 +1166,23 @@
   }
 
   function applyActionToBattleState(battle, action) {
-    if (!battle || !action || action.targetId == null) return;
+    if (!battle || !action) return;
+
+    if (action.actorType === 'player' && action.mpAfterAction != null && battle.player) {
+      battle.player.mp = Math.max(0, Number(action.mpAfterAction));
+    } else if (action.actorType === 'monster' && action.actorId != null && action.mpAfterAction != null) {
+      const actingMonster = (battle.monsters || []).find(
+        (monster) => monster && (
+          String(monster.id) === String(action.actorId)
+          || String(monster.instance_id) === String(action.actorId)
+        )
+      );
+      if (actingMonster) {
+        actingMonster.mp = Math.max(0, Number(action.mpAfterAction));
+      }
+    }
+
+    if (action.targetId == null) return;
 
     const isPlayer = String(action.targetId) === String(battle.player?.id);
     const removedEffects = Array.isArray(action.removedEffects) ? action.removedEffects : [];
