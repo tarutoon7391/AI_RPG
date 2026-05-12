@@ -894,7 +894,8 @@
       state.battleSyncTimer = setTimeout(() => {
         // タイムアウト中にセッションが変わっていたら何もしない
         if (sessionIdAtConnect !== state.battleSessionId) return;
-        // ターン処理中でなく、かつボタンが無効のまま（waitingAction=false）なら同期を要求する
+        // ターン処理中でなく、かつボタンが無効なまま固まっている（waitingAction=false）場合、
+        // サーバーからの応答が届かなかった可能性があるため状態確認を要求する
         if (!state.activeBattleTurn && !state.waitingAction && state.battleState) {
           state.socket.emit('battle:sync');
         }
@@ -1019,7 +1020,9 @@
       state.socket.connect();
     }
     if (isBattleContinuable() && state.waitingAction && !state.activeBattleTurn) {
-      // プレイヤーターン待ちの場合はボタンを有効化する
+      // プレイヤーターン待ちかつターン処理中でない場合にボタンを有効化する
+      // （activeBattleTurn=true の場合は releasePendingWaits() でターン処理を進め、
+      //   processBattleTurn の終了時に setCommandEnabled が呼ばれる）
       setCommandEnabled(true);
     }
   }
