@@ -24,7 +24,6 @@ const {
   processTurn,
   getBattleState,
   calculateMonsterReward,
-  isEnemyActingFirst,
 } = require('../battle/engine');
 const {
   calcLevelFromExp,
@@ -679,6 +678,13 @@ function buildTurnPayloadWithRewards(battleState, turnResult) {
   };
 }
 
+function isBattleAwaitingPlayerAction(battleState) {
+  if (!battleState || !battleState.player) return false;
+  if ((battleState.player.hp || 0) <= 0) return false;
+  const aliveMonsters = (battleState.monsters || []).filter((m) => m && m.hp > 0 && !m.escaped);
+  return aliveMonsters.length > 0;
+}
+
 function getBattleEndMessage(result) {
   if (result === 'win') return '勝利！';
   if (result === 'lose') return '敗北...';
@@ -819,28 +825,14 @@ async function finalizeBattleResult({
       encounterIndex: nextEncounterIndex,
     });
 
-    const playerActsFirst = !isEnemyActingFirst(nextBattleState);
     socket.emit('battle:start', {
       turn: nextBattleState.turn,
       state: getBattleState(nextBattleState),
       playerSkills: nextBattleState.player.skills || [],
       previousVictoryLog: buildBattleVictoryMessage(battleState.monsters, rewards),
       message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${formatMonsterNames(monsters).join('、')} が現れた！`,
-      awaitingPlayerAction: playerActsFirst,
+      awaitingPlayerAction: true,
     });
-
-    if (!playerActsFirst) {
-      const enemyOpening = processTurn(nextBattleState, null, { mode: 'enemy_only' });
-      socket.emit('battle:turn', buildTurnPayloadWithRewards(nextBattleState, enemyOpening));
-      if (enemyOpening.battleOver) {
-        await finalizeBattleResult({
-          socket,
-          userId,
-          battleState: nextBattleState,
-          result: enemyOpening.result,
-        });
-      }
-    }
     return;
   }
 
@@ -978,7 +970,6 @@ function registerSocketHandlers(io) {
           totalMoney: 0,
         });
 
-        const playerActsFirst = !isEnemyActingFirst(battleState);
         socket.emit('battle:start', {
           turn: battleState.turn,
           state: getBattleState(battleState),
@@ -986,21 +977,8 @@ function registerSocketHandlers(io) {
           message: Number(safeDungeonId) === 1
             ? `第1戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${formatMonsterNames(monsters).join('、')} が現れた！`
             : `${formatMonsterNames(monsters).join('、')} が現れた！`,
-          awaitingPlayerAction: playerActsFirst,
+          awaitingPlayerAction: true,
         });
-
-        if (!playerActsFirst) {
-          const enemyOpening = processTurn(battleState, null, { mode: 'enemy_only' });
-          socket.emit('battle:turn', buildTurnPayloadWithRewards(battleState, enemyOpening));
-          if (enemyOpening.battleOver) {
-            await finalizeBattleResult({
-              socket,
-              userId,
-              battleState,
-              result: enemyOpening.result,
-            });
-          }
-        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[socket] battle:startRequest エラー:', err);
@@ -1039,45 +1017,15 @@ function registerSocketHandlers(io) {
         skill,
       };
 
-      const enemyFirst = isEnemyActingFirst(battleState);
-      if (enemyFirst) {
-        const playerResult = processTurn(battleState, playerAction, { mode: 'player_only' });
-        const playerTurnPayload = buildTurnPayloadWithRewards(battleState, playerResult);
-        playerTurnPayload.awaitingPlayerAction = false;
-        socket.emit('battle:turn', playerTurnPayload);
-
-        if (playerResult.battleOver) {
-          await finalizeBattleResult({
-            socket,
-            userId,
-            battleState,
-            result: playerResult.result,
-          });
-          if (typeof ack === 'function') ack({ ok: true });
-          return;
-        }
-
-        const enemyResult = processTurn(battleState, null, { mode: 'enemy_only' });
-        socket.emit('battle:turn', buildTurnPayloadWithRewards(battleState, enemyResult));
-        if (enemyResult.battleOver) {
-          await finalizeBattleResult({
-            socket,
-            userId,
-            battleState,
-            result: enemyResult.result,
-          });
-        }
-      } else {
-        const turnResult = processTurn(battleState, playerAction);
-        socket.emit('battle:turn', buildTurnPayloadWithRewards(battleState, turnResult));
-        if (turnResult.battleOver) {
-          await finalizeBattleResult({
-            socket,
-            userId,
-            battleState,
-            result: turnResult.result,
-          });
-        }
+      const turnResult = processTurn(battleState, playerAction);
+      socket.emit('battle:turn', buildTurnPayloadWithRewards(battleState, turnResult));
+      if (turnResult.battleOver) {
+        await finalizeBattleResult({
+          socket,
+          userId,
+          battleState,
+          result: turnResult.result,
+        });
       }
 
       if (typeof ack === 'function') ack({ ok: true });
@@ -1091,7 +1039,13 @@ function registerSocketHandlers(io) {
       if (!currentBattle) {
         socket.emit('battle:syncResult', { exists: false });
       } else {
-        socket.emit('battle:syncResult', { exists: true });
+        socket.emit('battle:syncResult', {
+          exists: true,
+          turn: currentBattle.turn,
+          state: getBattleState(currentBattle),
+          playerSkills: currentBattle.player.skills || [],
+          awaitingPlayerAction: isBattleAwaitingPlayerAction(currentBattle),
+        });
       }
       if (typeof ack === 'function') ack({ ok: true });
     });
