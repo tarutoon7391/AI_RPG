@@ -688,9 +688,7 @@
     removeButton.type = 'button';
     removeButton.textContent = '外す';
     removeButton.classList.toggle('active', !currentItemId);
-    removeButton.addEventListener('click', () => {
-      equipItem(slot, null);
-    });
+    removeButton.addEventListener('click', () => equipItem(slot, null));
     els.miniPopup.appendChild(removeButton);
 
     items.forEach((item) => {
@@ -698,9 +696,7 @@
       btn.type = 'button';
       btn.classList.toggle('active', item.id === currentItemId);
       btn.textContent = `${item.name}　${formatItemEffect(item)}`;
-      btn.addEventListener('click', () => {
-        equipItem(slot, item.id);
-      });
+      btn.addEventListener('click', () => equipItem(slot, item.id));
       els.miniPopup.appendChild(btn);
     });
   }
