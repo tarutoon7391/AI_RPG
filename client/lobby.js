@@ -29,6 +29,7 @@
     shoes: '靴',
     accessory: 'アクセサリー',
   };
+  const EQUIP_SLOT_KEYS = Object.keys(EQUIP_SLOT_LABELS);
   const DEFAULT_EQUIP_INVENTORY = {
     head: [
       { id: 'head_1', name: '革の帽子', bonus: { defense: 3, evasionRate: 2 } },
@@ -251,6 +252,10 @@
     return JSON.parse(JSON.stringify(defaultSave));
   }
 
+  function cloneDefaultEquipment() {
+    return JSON.parse(JSON.stringify(DEFAULT_EQUIPPED));
+  }
+
   function getObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
@@ -295,6 +300,21 @@
     return normalized;
   }
 
+  function sanitizeEquippedItems(value, defaults) {
+    const src = getObject(value);
+    const normalized = {};
+    EQUIP_SLOT_KEYS.forEach((slot) => {
+      const itemId = typeof src[slot] === 'string' ? src[slot].trim() : '';
+      normalized[slot] = itemId || defaults[slot];
+    });
+    return normalized;
+  }
+
+  function isSameEquipment(a, b) {
+    const pickEquipmentSlot = (value, slot) => (value && value[slot] ? value[slot] : null);
+    return EQUIP_SLOT_KEYS.every((slot) => pickEquipmentSlot(a, slot) === pickEquipmentSlot(b, slot));
+  }
+
   function migrateSaveData(raw) {
     const defaults = cloneDefaultSave();
     const src = getObject(raw);
@@ -303,9 +323,7 @@
     const progressSrc = getObject(src.progress);
     const battleSrc = getObject(src.battle);
     const characterSrc = getObject(src.character);
-    const equipmentSrc = getObject(characterSrc.equipment);
     const inventorySrc = getObject(characterSrc.equipmentInventory);
-    const legacyEquipmentSrc = getObject(src.equipment);
 
     const migrated = {
       version: defaults.version,
@@ -356,23 +374,7 @@
         lastGrowthJobName: typeof characterSrc.lastGrowthJobName === 'string'
           ? characterSrc.lastGrowthJobName
           : defaults.character.lastGrowthJobName,
-        equipment: {
-          head: typeof equipmentSrc.head === 'string'
-            ? equipmentSrc.head
-            : (typeof legacyEquipmentSrc.head === 'string' ? legacyEquipmentSrc.head : defaults.character.equipment.head),
-          body: typeof equipmentSrc.body === 'string'
-            ? equipmentSrc.body
-            : (typeof legacyEquipmentSrc.body === 'string' ? legacyEquipmentSrc.body : defaults.character.equipment.body),
-          legs: typeof equipmentSrc.legs === 'string'
-            ? equipmentSrc.legs
-            : (typeof legacyEquipmentSrc.legs === 'string' ? legacyEquipmentSrc.legs : defaults.character.equipment.legs),
-          shoes: typeof equipmentSrc.shoes === 'string'
-            ? equipmentSrc.shoes
-            : (typeof legacyEquipmentSrc.shoes === 'string' ? legacyEquipmentSrc.shoes : defaults.character.equipment.shoes),
-          accessory: typeof equipmentSrc.accessory === 'string'
-            ? equipmentSrc.accessory
-            : (typeof legacyEquipmentSrc.accessory === 'string' ? legacyEquipmentSrc.accessory : defaults.character.equipment.accessory),
-        },
+        equipment: sanitizeEquippedItems(characterSrc.equipment, defaults.character.equipment),
         equipmentInventory: sanitizeEquipmentInventory(inventorySrc, defaults.character.equipmentInventory),
       },
     };
@@ -651,11 +653,33 @@
     els.miniPopup.style.left = `${left}px`;
   }
 
-  function equipItem(slot, itemId) {
-    state.save.character.equipment[slot] = itemId || null;
-    persistSave();
-    renderCharacterView();
-    closeMiniPopup();
+  async function saveEquipmentOnServer(nextEquipment) {
+    const res = await fetch('/api/character/equipment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ equipment: nextEquipment }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || '装備の保存に失敗しました');
+    }
+    return sanitizeEquippedItems(data.equipment, cloneDefaultEquipment());
+  }
+
+  async function equipItem(slot, itemId) {
+    try {
+      const nextEquipment = {
+        ...state.save.character.equipment,
+        [slot]: itemId || null,
+      };
+      state.save.character.equipment = await saveEquipmentOnServer(nextEquipment);
+      persistSave();
+      renderCharacterView();
+      closeMiniPopup();
+    } catch (e) {
+      showModal((e && e.message) || '装備の保存に失敗しました');
+    }
   }
 
   function openEquipmentPopup(slot, anchorEl) {
@@ -1844,6 +1868,14 @@
           shouldPersist = true;
         }
       }
+      const incomingEquipment = sanitizeEquippedItems(
+        character.equipped_items,
+        cloneDefaultEquipment()
+      );
+      if (!isSameEquipment(state.save.character.equipment, incomingEquipment)) {
+        state.save.character.equipment = incomingEquipment;
+        shouldPersist = true;
+      }
       if (shouldPersist) persistSave();
       const displayName = character.name || state.user?.name || state.user?.username;
       if (displayName) {
@@ -1923,6 +1955,8 @@
         showModal((data && data.error) || 'ログアウトに失敗しました');
         return;
       }
+      state.save.character.equipment = cloneDefaultEquipment();
+      persistSave();
       showLoginView();
     } catch (_e) {
       showModal('ネットワークエラーが発生しました');
