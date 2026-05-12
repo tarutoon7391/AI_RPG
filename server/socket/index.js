@@ -23,13 +23,15 @@ const db = require('../db');
 const {
   processTurn,
   getBattleState,
-  calculateRewards,
+  calculateMonsterReward,
   isEnemyActingFirst,
 } = require('../battle/engine');
 const {
+  calcLevelFromExp,
   ensureLearnedSkillsUpToLevel,
   fetchLearnedSkills,
   syncJobProgress,
+  JOB_LEVEL_GROWTH_TABLE,
 } = require('../services/skillProgression');
 
 // userId → battleState のインメモリストア（ソケット再接続後もバトル状態を保持するために userId をキーとして使用）
@@ -44,6 +46,8 @@ const BEGINNER_MEADOW_BOSS_MONSTER_ID = 6;
 const BEGINNER_MEADOW_METAL_SLIME_MONSTER_ID = 5;
 const BEGINNER_MEADOW_METAL_SLIME_RATE = 5;
 const BEGINNER_MEADOW_NORMAL_MONSTER_IDS = [1, 2, 3, 4, 5];
+// 永続ボーナス付与のレベル間隔（Lv5, Lv10, ...）
+const PERMANENT_BONUS_INTERVAL = 5;
 let monsterInstanceCounter = 0;
 
 function toInt(value, fallback = 0) {
@@ -52,15 +56,70 @@ function toInt(value, fallback = 0) {
   return Math.floor(num);
 }
 
+function normalizeGrowthMap(value) {
+  const src = value && typeof value === 'object' ? value : {};
+  return {
+    hp: toInt(src.hp, 0),
+    mp: toInt(src.mp, 0),
+    attack: toInt(src.attack, 0),
+    defense: toInt(src.defense, 0),
+    recovery: toInt(src.recovery, 0),
+    speed: toInt(src.speed, 0),
+    charm: toInt(src.charm, 0),
+  };
+}
+
+function addGrowthMap(base, delta) {
+  const b = normalizeGrowthMap(base);
+  const d = normalizeGrowthMap(delta);
+  return {
+    hp: b.hp + d.hp,
+    mp: b.mp + d.mp,
+    attack: b.attack + d.attack,
+    defense: b.defense + d.defense,
+    recovery: b.recovery + d.recovery,
+    speed: b.speed + d.speed,
+    charm: b.charm + d.charm,
+  };
+}
+
+function multiplyGrowth(growth, levels) {
+  const src = normalizeGrowthMap(growth);
+  const lv = Math.max(0, toInt(levels, 0));
+  return {
+    hp: src.hp * lv,
+    mp: src.mp * lv,
+    attack: src.attack * lv,
+    defense: src.defense * lv,
+    recovery: src.recovery * lv,
+    speed: src.speed * lv,
+    charm: src.charm * lv,
+  };
+}
+
+function formatGrowthLogLine(prefix, growth) {
+  const g = normalizeGrowthMap(growth);
+  const chunks = [];
+  if (g.hp) chunks.push(`HP+${g.hp}`);
+  if (g.attack) chunks.push(`攻撃力+${g.attack}`);
+  if (g.defense) chunks.push(`防御力+${g.defense}`);
+  if (g.mp) chunks.push(`MP+${g.mp}`);
+  if (g.speed) chunks.push(`素早さ+${g.speed}`);
+  if (g.recovery) chunks.push(`回復力+${g.recovery}`);
+  if (g.charm) chunks.push(`魅力度+${g.charm}`);
+  return chunks.length ? `${prefix}${chunks.join(', ')}` : null;
+}
+
 /**
  * キャラクターとスキルをDBから読み込む
  */
 async function loadCharacter(userId) {
   const charResult = await db.query(
-    `SELECT c.*, u.username, COALESCE(cj.level, 1) AS job_level
+    `SELECT c.*, u.username, COALESCE(cj.level, 1) AS job_level, j.name AS job_name
      FROM characters c
      INNER JOIN users u ON u.id = c.user_id
      LEFT JOIN character_jobs cj ON cj.character_id = c.id AND cj.job_id = c.current_job_id
+     LEFT JOIN jobs j ON j.id = c.current_job_id
      WHERE c.user_id = $1
      LIMIT 1`,
     [userId]
@@ -86,9 +145,23 @@ async function loadCharacter(userId) {
     );
     skills = await fetchLearnedSkills(db, char.id, char.current_job_id);
     char.job_level = progress.levelAfter || char.job_level || 1;
+    char.job_exp = progress.expAfter || 0;
   }
   char.skills = skills;
   return char;
+}
+
+async function fetchJobSkills(jobId) {
+  if (!jobId) return [];
+  const result = await db.query(
+    `SELECT s.*, js.required_level
+     FROM job_skills js
+     INNER JOIN skills s ON s.id = js.skill_id
+     WHERE js.job_id = $1
+     ORDER BY js.required_level ASC, s.id ASC`,
+    [jobId]
+  );
+  return result.rows || [];
 }
 
 async function applyBattleRewards(userId, rewards) {
@@ -358,6 +431,18 @@ async function buildEncounterMonsters(dungeonId, encounterIndex, floor) {
 }
 
 function createBattleState({ dungeonId, floor, character, monsters, encounterIndex }) {
+  const jobId = toInt(character.current_job_id, 0);
+  const initialJobLevel = Math.max(1, toInt(character.job_level, 1));
+  const initialJobExp = Math.max(0, toInt(character.job_exp, 0));
+  const perLevelGrowth = normalizeGrowthMap(
+    JOB_LEVEL_GROWTH_TABLE[character.job_name] || {}
+  );
+  const learnedSkillIds = new Set(
+    (character.skills || [])
+      .map((skill) => Number(skill && skill.id))
+      .filter((id) => Number.isFinite(id))
+  );
+
   return {
     turn: 1,
     dungeonId,
@@ -373,15 +458,207 @@ function createBattleState({ dungeonId, floor, character, monsters, encounterInd
       max_mp: character.max_mp,
       attack: character.attack,
       defense: character.defense,
+      recovery: character.recovery,
       speed: character.speed,
+      charm: character.charm,
       crit_rate: parseFloat(character.crit_rate) || 0,
       evasion_rate: parseFloat(character.evasion_rate) || 0,
       element: character.element || 'none',
       skills: character.skills,
+      permanent_bonus: normalizeGrowthMap(character.permanent_bonus || {}),
       buffs: [],
       statusEffects: [],
     },
     monsters,
+    rewardProgress: {
+      pendingExp: 0,
+      pendingMoney: 0,
+      rewardedMonsterIds: new Set(),
+      progression: {
+        enabled: !!jobId,
+        jobId: jobId || null,
+        level: initialJobLevel,
+        jobExp: initialJobExp,
+        perLevelGrowth,
+        knownSkillIds: learnedSkillIds,
+        jobSkills: [],
+      },
+    },
+  };
+}
+
+function isMonsterRewardTriggerAction(action) {
+  if (!action || typeof action !== 'object') return false;
+  if (action.actionType === 'defeated' && action.actorType === 'system') return true;
+  if (action.actionType === 'escape' && action.actorType === 'monster') return true;
+  return false;
+}
+
+function getRewardTargetMonster(action, monsters) {
+  if (!isMonsterRewardTriggerAction(action)) return null;
+  const sourceId = action.actionType === 'escape'
+    ? String(action.actorId)
+    : String(action.targetId);
+  return (monsters || []).find(
+    (monster) => String(monster.instance_id || monster.id) === sourceId
+  ) || null;
+}
+
+function applyLevelUpGrowthToBattlePlayer(player, totalGrowth, permanentBonusGain) {
+  const growth = normalizeGrowthMap(totalGrowth);
+  const permGain = normalizeGrowthMap(permanentBonusGain);
+  const maxHpGain = growth.hp + permGain.hp;
+  const maxMpGain = growth.mp + permGain.mp;
+  player.max_hp = Math.max(1, toInt(player.max_hp, 1) + maxHpGain);
+  player.max_mp = Math.max(0, toInt(player.max_mp, 0) + maxMpGain);
+  player.hp = player.max_hp;
+  player.mp = player.max_mp;
+  player.attack = Math.max(0, toInt(player.attack, 0) + growth.attack + permGain.attack);
+  player.defense = Math.max(0, toInt(player.defense, 0) + growth.defense + permGain.defense);
+  player.recovery = Math.max(0, toInt(player.recovery, 0) + growth.recovery + permGain.recovery);
+  player.speed = Math.max(0, toInt(player.speed, 0) + growth.speed + permGain.speed);
+  player.charm = Math.max(0, toInt(player.charm, 0) + growth.charm + permGain.charm);
+  player.permanent_bonus = addGrowthMap(player.permanent_bonus || {}, permGain);
+}
+
+function buildRealtimeRewardActions({ battleState, triggerAction, reward }) {
+  const actions = [];
+  const safeExp = Math.max(0, toInt(reward.exp, 0));
+  const safeMoney = Math.max(0, toInt(reward.money, 0));
+  if (safeExp <= 0 && safeMoney <= 0) return actions;
+
+  actions.push({
+    actorType: 'system',
+    actorId: null,
+    actionType: 'reward_gain',
+    targetId: triggerAction.targetId || triggerAction.actorId || null,
+    skillName: null,
+    specialSkill: false,
+    damage: 0,
+    heal: 0,
+    statusEffect: null,
+    isCrit: false,
+    isSupercrit: false,
+    missed: false,
+    reward: { exp: safeExp, money: safeMoney },
+    message: `経験値${safeExp}を獲得！ゴールド${safeMoney}を獲得！`,
+  });
+
+  const progression = battleState?.rewardProgress?.progression;
+  if (!progression || !progression.enabled || safeExp <= 0) return actions;
+
+  const levelBefore = Math.max(1, toInt(progression.level, 1));
+  const expAfter = Math.max(0, toInt(progression.jobExp, 0) + safeExp);
+  const levelAfter = Math.max(levelBefore, calcLevelFromExp(expAfter));
+  progression.jobExp = expAfter;
+
+  if (levelAfter <= levelBefore) return actions;
+
+  const levelsGained = levelAfter - levelBefore;
+  const totalGrowth = multiplyGrowth(progression.perLevelGrowth, levelsGained);
+  // 5レベル到達ごとのマイルストーン（Lv5, Lv10, ...）で永続ボーナスを加算する
+  const milestoneCount = Math.max(
+    0,
+    Math.floor(levelAfter / PERMANENT_BONUS_INTERVAL) - Math.floor(levelBefore / PERMANENT_BONUS_INTERVAL)
+  );
+  const permanentBonusGain = milestoneCount > 0
+    ? multiplyGrowth(progression.perLevelGrowth, milestoneCount)
+    : normalizeGrowthMap({});
+  progression.level = levelAfter;
+  applyLevelUpGrowthToBattlePlayer(battleState.player, totalGrowth, permanentBonusGain);
+
+  actions.push({
+    actorType: 'system',
+    actorId: null,
+    actionType: 'level_up',
+    targetId: battleState.player.id,
+    message: `レベルアップ！ Lv${levelBefore} → Lv${levelAfter}`,
+  });
+
+  const growthLine = formatGrowthLogLine('ステータス上昇：', totalGrowth);
+  if (growthLine) {
+    actions.push({
+      actorType: 'system',
+      actorId: null,
+      actionType: 'level_up_stats',
+      targetId: battleState.player.id,
+      message: growthLine,
+    });
+  }
+
+  const permLine = formatGrowthLogLine('永続ボーナス上昇：', permanentBonusGain);
+  if (permLine) {
+    actions.push({
+      actorType: 'system',
+      actorId: null,
+      actionType: 'permanent_bonus_up',
+      targetId: battleState.player.id,
+      message: permLine,
+    });
+  }
+
+  const learnedSkillActions = [];
+  for (const skill of progression.jobSkills || []) {
+    if (!skill) continue;
+    const requiredLevel = Math.max(1, toInt(skill.required_level, 1));
+    if (requiredLevel > levelAfter) continue;
+    const skillId = Number(skill.id);
+    if (!Number.isFinite(skillId)) continue;
+    if (progression.knownSkillIds.has(skillId)) continue;
+    progression.knownSkillIds.add(skillId);
+    battleState.player.skills = Array.isArray(battleState.player.skills)
+      ? [...battleState.player.skills, skill]
+      : [skill];
+    learnedSkillActions.push({
+      actorType: 'system',
+      actorId: null,
+      actionType: 'skill_learned',
+      targetId: battleState.player.id,
+      message: `スキル『${skill.name}』を習得した！`,
+    });
+  }
+  actions.push(...learnedSkillActions);
+  return actions;
+}
+
+function applyRealtimeBattleRewards(battleState, actions) {
+  if (!battleState || !Array.isArray(actions) || !actions.length) return actions;
+  const rewardProgress = battleState.rewardProgress;
+  if (!rewardProgress) return actions;
+
+  const enriched = [];
+  for (const action of actions) {
+    enriched.push(action);
+    const monster = getRewardTargetMonster(action, battleState.monsters || []);
+    if (!monster) continue;
+    const monsterId = String(monster.instance_id || monster.id);
+    if (rewardProgress.rewardedMonsterIds.has(monsterId)) continue;
+    rewardProgress.rewardedMonsterIds.add(monsterId);
+
+    const reward = calculateMonsterReward(monster, battleState.floor, { includeEscaped: true });
+    const safeExp = Math.max(0, toInt(reward.exp, 0));
+    const safeMoney = Math.max(0, toInt(reward.money, 0));
+    rewardProgress.pendingExp += safeExp;
+    rewardProgress.pendingMoney += safeMoney;
+
+    const rewardActions = buildRealtimeRewardActions({
+      battleState,
+      triggerAction: action,
+      reward: { exp: safeExp, money: safeMoney },
+    });
+    enriched.push(...rewardActions);
+  }
+  return enriched;
+}
+
+function buildTurnPayloadWithRewards(battleState, turnResult) {
+  const actions = applyRealtimeBattleRewards(battleState, turnResult.actions || []);
+  return {
+    turn: battleState.turn,
+    actions,
+    state: getBattleState(battleState),
+    playerSkills: battleState.player.skills || [],
+    awaitingPlayerAction: !turnResult.battleOver,
   };
 }
 
@@ -407,14 +684,25 @@ async function finalizeBattleResult({
   battleState,
   result,
 }) {
-  const rewards = result === 'win'
-    ? calculateRewards(battleState.monsters, battleState.floor)
+  const pendingRewards = battleState?.rewardProgress
+    ? {
+      exp: toInt(battleState.rewardProgress.pendingExp, 0),
+      money: toInt(battleState.rewardProgress.pendingMoney, 0),
+    }
     : { exp: 0, money: 0 };
+  const rewards = (result === 'win' || result === 'enemy_escape')
+    ? pendingRewards
+    : { exp: 0, money: 0 };
+  // 「敵が逃走して戦闘終了」の場合も、プレイヤー死亡/逃走/離脱ではないため仮付与を確定する
 
   let rewardResult = null;
-  if (result === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
+  if ((result === 'win' || result === 'enemy_escape') && userId && (rewards.exp > 0 || rewards.money > 0)) {
     try {
       rewardResult = await applyBattleRewards(userId, rewards);
+      // レベルアップ/習得ログは戦闘中リアルタイムで表示済みのため、battle:end では再表示しない
+      if (rewardResult) {
+        rewardResult = { ...rewardResult, levelUp: null };
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[socket] 報酬更新エラー:', err);
@@ -445,7 +733,7 @@ async function finalizeBattleResult({
     totalExp: 0,
     totalMoney: 0,
   };
-  if (result === 'win') {
+  if (result === 'win' || result === 'enemy_escape') {
     baseRun.totalExp = (Number(baseRun.totalExp) || 0) + rewards.exp;
     baseRun.totalMoney = (Number(baseRun.totalMoney) || 0) + rewards.money;
     activeDungeonRuns.set(userId, baseRun);
@@ -487,7 +775,6 @@ async function finalizeBattleResult({
       dungeonId: baseRun.dungeonId,
       floor: baseRun.floor,
       encounterIndex: nextEncounterIndex,
-      monsters,
       character: {
         ...nextCharacter,
         id: nextCharacter.id || battleState.player.id,
@@ -499,7 +786,13 @@ async function finalizeBattleResult({
         max_mp: toInt(nextCharacter.max_mp || battleState.player.max_mp),
         skills: nextCharacter.skills || battleState.player.skills,
       },
+      monsters,
     });
+    if (nextBattleState.rewardProgress?.progression?.enabled) {
+      nextBattleState.rewardProgress.progression.jobSkills = await fetchJobSkills(
+        nextBattleState.rewardProgress.progression.jobId
+      );
+    }
     // バフ・状態異常は新しい戦闘でリセット（ターン状態の引き継ぎを防ぐ）
     nextBattleState.player.buffs = [];
     nextBattleState.player.statusEffects = [];
@@ -521,12 +814,7 @@ async function finalizeBattleResult({
 
     if (!playerActsFirst) {
       const enemyOpening = processTurn(nextBattleState, null, { mode: 'enemy_only' });
-      socket.emit('battle:turn', {
-        turn: nextBattleState.turn,
-        actions: enemyOpening.actions,
-        state: enemyOpening.state,
-        awaitingPlayerAction: !enemyOpening.battleOver,
-      });
+      socket.emit('battle:turn', buildTurnPayloadWithRewards(nextBattleState, enemyOpening));
       if (enemyOpening.battleOver) {
         await finalizeBattleResult({
           socket,
@@ -654,6 +942,11 @@ function registerSocketHandlers(io) {
           monsters,
           encounterIndex,
         });
+        if (battleState.rewardProgress?.progression?.enabled) {
+          battleState.rewardProgress.progression.jobSkills = await fetchJobSkills(
+            battleState.rewardProgress.progression.jobId
+          );
+        }
         // 新しい戦闘開始時はターン状態をリセットしてから素早さ比較を行う
         battleState.player.buffs = [];
         battleState.player.statusEffects = [];
@@ -681,12 +974,7 @@ function registerSocketHandlers(io) {
 
         if (!playerActsFirst) {
           const enemyOpening = processTurn(battleState, null, { mode: 'enemy_only' });
-          socket.emit('battle:turn', {
-            turn: battleState.turn,
-            actions: enemyOpening.actions,
-            state: enemyOpening.state,
-            awaitingPlayerAction: !enemyOpening.battleOver,
-          });
+          socket.emit('battle:turn', buildTurnPayloadWithRewards(battleState, enemyOpening));
           if (enemyOpening.battleOver) {
             await finalizeBattleResult({
               socket,
@@ -737,12 +1025,9 @@ function registerSocketHandlers(io) {
       const enemyFirst = isEnemyActingFirst(battleState);
       if (enemyFirst) {
         const playerResult = processTurn(battleState, playerAction, { mode: 'player_only' });
-        socket.emit('battle:turn', {
-          turn: battleState.turn,
-          actions: playerResult.actions,
-          state: playerResult.state,
-          awaitingPlayerAction: false,
-        });
+        const playerTurnPayload = buildTurnPayloadWithRewards(battleState, playerResult);
+        playerTurnPayload.awaitingPlayerAction = false;
+        socket.emit('battle:turn', playerTurnPayload);
 
         if (playerResult.battleOver) {
           await finalizeBattleResult({
@@ -756,12 +1041,7 @@ function registerSocketHandlers(io) {
         }
 
         const enemyResult = processTurn(battleState, null, { mode: 'enemy_only' });
-        socket.emit('battle:turn', {
-          turn: battleState.turn,
-          actions: enemyResult.actions,
-          state: enemyResult.state,
-          awaitingPlayerAction: !enemyResult.battleOver,
-        });
+        socket.emit('battle:turn', buildTurnPayloadWithRewards(battleState, enemyResult));
         if (enemyResult.battleOver) {
           await finalizeBattleResult({
             socket,
@@ -772,12 +1052,7 @@ function registerSocketHandlers(io) {
         }
       } else {
         const turnResult = processTurn(battleState, playerAction);
-        socket.emit('battle:turn', {
-          turn: battleState.turn,
-          actions: turnResult.actions,
-          state: turnResult.state,
-          awaitingPlayerAction: !turnResult.battleOver,
-        });
+        socket.emit('battle:turn', buildTurnPayloadWithRewards(battleState, turnResult));
         if (turnResult.battleOver) {
           await finalizeBattleResult({
             socket,
@@ -800,6 +1075,14 @@ function registerSocketHandlers(io) {
         socket.emit('battle:syncResult', { exists: false });
       } else {
         socket.emit('battle:syncResult', { exists: true });
+      }
+      if (typeof ack === 'function') ack({ ok: true });
+    });
+
+    socket.on('battle:abandon', (payload, ack) => {
+      if (userId) {
+        activeBattles.delete(userId);
+        activeDungeonRuns.delete(userId);
       }
       if (typeof ack === 'function') ack({ ok: true });
     });
