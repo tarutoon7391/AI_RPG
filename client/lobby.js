@@ -311,7 +311,8 @@
   }
 
   function isSameEquipment(a, b) {
-    return EQUIP_SLOT_KEYS.every((slot) => (a && a[slot] ? a[slot] : null) === (b && b[slot] ? b[slot] : null));
+    const pickEquipmentSlot = (value, slot) => (value && value[slot] ? value[slot] : null);
+    return EQUIP_SLOT_KEYS.every((slot) => pickEquipmentSlot(a, slot) === pickEquipmentSlot(b, slot));
   }
 
   function migrateSaveData(raw) {
@@ -677,7 +678,7 @@
       renderCharacterView();
       closeMiniPopup();
     } catch (e) {
-      showModal(e && e.message ? e.message : '装備の保存に失敗しました');
+      showModal((e && e.message) || '装備の保存に失敗しました');
     }
   }
 
