@@ -1587,7 +1587,7 @@
     state.enemyUiMap = new Map();
     const enemyCount = visibleMonsters.length;
     els.enemyList.classList.toggle('single', enemyCount === 1);
-    const nameMap = buildEnemyNameMap(visibleMonsters);
+    const nameMap = buildEnemyNameMap(monsters || []);
     visibleMonsters.forEach((enemy) => {
       const card = document.createElement('div');
       card.className = `enemy-card${enemy.isAlive ? '' : ' defeated'}`;

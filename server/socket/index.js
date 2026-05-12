@@ -490,15 +490,12 @@ function createBattleState({ dungeonId, floor, character, monsters, encounterInd
 function isMonsterRewardTriggerAction(action) {
   if (!action || typeof action !== 'object') return false;
   if (action.actionType === 'defeated' && action.actorType === 'system') return true;
-  if (action.actionType === 'escape' && action.actorType === 'monster') return true;
   return false;
 }
 
 function getRewardTargetMonster(action, monsters) {
   if (!isMonsterRewardTriggerAction(action)) return null;
-  const sourceId = action.actionType === 'escape'
-    ? String(action.actorId)
-    : String(action.targetId);
+  const sourceId = String(action.targetId);
   return (monsters || []).find(
     (monster) => String(monster.instance_id || monster.id) === sourceId
   ) || null;
@@ -621,12 +618,19 @@ function buildRealtimeRewardActions({ battleState, triggerAction, reward }) {
   return actions;
 }
 
+function areAllMonstersDefeated(monsters) {
+  return (monsters || []).length > 0
+    && (monsters || []).every((m) => m && m.hp <= 0 && !m.escaped);
+}
+
 function applyRealtimeBattleRewards(battleState, actions) {
   if (!battleState || !Array.isArray(actions) || !actions.length) return actions;
   const rewardProgress = battleState.rewardProgress;
   if (!rewardProgress) return actions;
 
   const enriched = [];
+  const battleMonsters = Array.isArray(battleState.monsters) ? battleState.monsters : [];
+  const isSingleEncounter = battleMonsters.length <= 1;
   for (const action of actions) {
     enriched.push(action);
     const monster = getRewardTargetMonster(action, battleState.monsters || []);
@@ -640,11 +644,24 @@ function applyRealtimeBattleRewards(battleState, actions) {
     const safeMoney = Math.max(0, toInt(reward.money, 0));
     rewardProgress.pendingExp += safeExp;
     rewardProgress.pendingMoney += safeMoney;
-
+    const allDefeated = areAllMonstersDefeated(battleMonsters);
+    const shouldDistributeRewardNow = isSingleEncounter || allDefeated;
+    if (!shouldDistributeRewardNow) {
+      continue;
+    }
+    const totalReward = {
+      exp: Math.max(0, toInt(rewardProgress.pendingExp, 0)),
+      money: Math.max(0, toInt(rewardProgress.pendingMoney, 0)),
+    };
+    if (totalReward.exp <= 0 && totalReward.money <= 0) {
+      continue;
+    }
+    rewardProgress.pendingExp = 0;
+    rewardProgress.pendingMoney = 0;
     const rewardActions = buildRealtimeRewardActions({
       battleState,
       triggerAction: action,
-      reward: { exp: safeExp, money: safeMoney },
+      reward: totalReward,
     });
     enriched.push(...rewardActions);
   }
@@ -690,13 +707,13 @@ async function finalizeBattleResult({
       money: toInt(battleState.rewardProgress.pendingMoney, 0),
     }
     : { exp: 0, money: 0 };
-  const rewards = (result === 'win' || result === 'enemy_escape')
+  const allMonstersDefeated = areAllMonstersDefeated(battleState?.monsters || []);
+  const rewards = (result === 'win' && allMonstersDefeated)
     ? pendingRewards
     : { exp: 0, money: 0 };
-  // 「敵が逃走して戦闘終了」の場合も、プレイヤー死亡/逃走/離脱ではないため仮付与を確定する
 
   let rewardResult = null;
-  if ((result === 'win' || result === 'enemy_escape') && userId && (rewards.exp > 0 || rewards.money > 0)) {
+  if (result === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
     try {
       rewardResult = await applyBattleRewards(userId, rewards);
       // レベルアップ/習得ログは戦闘中リアルタイムで表示済みのため、battle:end では再表示しない
@@ -733,7 +750,7 @@ async function finalizeBattleResult({
     totalExp: 0,
     totalMoney: 0,
   };
-  if (result === 'win' || result === 'enemy_escape') {
+  if (result === 'win') {
     baseRun.totalExp = (Number(baseRun.totalExp) || 0) + rewards.exp;
     baseRun.totalMoney = (Number(baseRun.totalMoney) || 0) + rewards.money;
     activeDungeonRuns.set(userId, baseRun);
