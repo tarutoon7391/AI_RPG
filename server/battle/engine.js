@@ -721,7 +721,7 @@ function processTurn(battleState, playerAction, options = {}) {
                 message: actualSkill.is_special
                   ? null
                   : (ineffective
-                    ? `${getCombatantLogName(targetMonster, monsterNameMap)} には効果がなかった！`
+                    ? `${getCombatantLogName(targetMonster, monsterNameMap)}には効果がなかった！`
                     : (missed
                     ? `${getCombatantLogName(targetMonster, monsterNameMap)} はかわした！`
                     : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`)),
@@ -876,7 +876,7 @@ function processTurn(battleState, playerAction, options = {}) {
             message: skill.is_special
               ? null
               : (ineffective
-                ? `${player.name} には効果がなかった！`
+                ? `${player.name}には効果がなかった！`
                 : (missed
                 ? `${player.name} はかわした！`
                 : `${getCombatantLogName(monster, monsterNameMap)} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`)),
