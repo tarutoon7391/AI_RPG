@@ -1318,7 +1318,7 @@
   function getActionPostDelayMs(action) {
     if (!action) return DEFAULT_ACTION_DELAY_MS;
     if (action.actionType === 'reward_gain') return REWARD_GAIN_LOG_DELAY_MS;
-    if (action.actionType === 'level_up') return 0;
+    if (action.actionType === 'level_up') return 350;
     if (action.actionType === 'level_up_stats') return LEVEL_UP_POST_DELAY_MS;
     if (action.actionType === 'permanent_bonus_up') return PERMANENT_BONUS_POST_DELAY_MS;
     if (action.actionType === 'skill_learned') return 0;

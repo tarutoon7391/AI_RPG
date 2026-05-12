@@ -994,6 +994,7 @@ function getBattleState(battleState) {
 }
 
 function calculateMonsterReward(monster, floor, options = {}) {
+  // 仕様: モンスターは撃破時だけでなく逃走時にも報酬対象
   const includeEscaped = options.includeEscaped ?? true;
   const m = monster;
   if (!m) return { exp: 0, money: 0 };

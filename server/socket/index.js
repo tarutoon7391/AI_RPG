@@ -432,7 +432,7 @@ async function buildEncounterMonsters(dungeonId, encounterIndex, floor) {
 function createBattleState({ dungeonId, floor, character, monsters, encounterIndex }) {
   const jobId = toInt(character.current_job_id, 0);
   const initialJobLevel = Math.max(1, toInt(character.job_level, 1));
-  const initialJobExp = Math.max(0, toInt(character.job_exp, (initialJobLevel - 1) * 100));
+  const initialJobExp = Math.max(0, toInt(character.job_exp, 0));
   const perLevelGrowth = normalizeGrowthMap(
     JOB_LEVEL_GROWTH_TABLE[character.job_name] || {}
   );
@@ -555,6 +555,7 @@ function buildRealtimeRewardActions({ battleState, triggerAction, reward }) {
 
   const levelsGained = levelAfter - levelBefore;
   const totalGrowth = multiplyGrowth(progression.perLevelGrowth, levelsGained);
+  // 5レベル到達ごとのマイルストーン（Lv5, Lv10, ...）で永続ボーナスを加算する
   const milestoneCount = Math.max(
     0,
     Math.floor(levelAfter / PERMANENT_BONUS_INTERVAL) - Math.floor(levelBefore / PERMANENT_BONUS_INTERVAL)
@@ -697,8 +698,8 @@ async function finalizeBattleResult({
     try {
       rewardResult = await applyBattleRewards(userId, rewards);
       // レベルアップ/習得ログは戦闘中リアルタイムで表示済みのため、battle:end では再表示しない
-      if (rewardResult && rewardResult.levelUp) {
-        rewardResult.levelUp = null;
+      if (rewardResult) {
+        rewardResult = { ...rewardResult, levelUp: null };
       }
     } catch (err) {
       // eslint-disable-next-line no-console
