@@ -305,11 +305,13 @@
     const normalized = {};
     EQUIP_SLOT_KEYS.forEach((slot) => {
       const itemId = typeof src[slot] === 'string' ? src[slot].trim() : '';
-      normalized[slot] = itemId
-        ? itemId
-        : defaults[slot];
+      normalized[slot] = itemId || defaults[slot];
     });
     return normalized;
+  }
+
+  function isSameEquipment(a, b) {
+    return EQUIP_SLOT_KEYS.every((slot) => (a && a[slot] ? a[slot] : null) === (b && b[slot] ? b[slot] : null));
   }
 
   function migrateSaveData(raw) {
@@ -1869,7 +1871,7 @@
         character.equipped_items,
         cloneDefaultEquipment()
       );
-      if (JSON.stringify(state.save.character.equipment) !== JSON.stringify(incomingEquipment)) {
+      if (!isSameEquipment(state.save.character.equipment, incomingEquipment)) {
         state.save.character.equipment = incomingEquipment;
         shouldPersist = true;
       }
