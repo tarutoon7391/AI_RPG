@@ -1172,7 +1172,10 @@
       battle.player.mp = Math.max(0, Number(action.mpAfterAction) || 0);
     } else if (action.actorType === 'monster' && action.actorId != null && action.mpAfterAction != null) {
       const actingMonster = (battle.monsters || []).find(
-        (monster) => monster && String(monster.id) === String(action.actorId)
+        (monster) => monster && (
+          String(monster.id) === String(action.actorId)
+          || String(monster.instance_id) === String(action.actorId)
+        )
       );
       if (actingMonster) {
         actingMonster.mp = Math.max(0, Number(action.mpAfterAction) || 0);

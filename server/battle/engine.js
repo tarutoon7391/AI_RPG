@@ -566,7 +566,7 @@ function processTurn(battleState, playerAction, options = {}) {
               isCrit: false, isSupercrit: false, missed: false,
               message: `${player.name} は混乱して自分を攻撃した！ ${damage} のダメージ！`,
             });
-          } else if (playerAction.actionType === 'skill' && requiredMp > (Number(player.mp) || 0)) {
+          } else if (requiredMp > (Number(player.mp) || 0)) {
             actions.push({
               actorType: 'player', actorId: player.id,
               actionType: 'skip', targetId: null,
