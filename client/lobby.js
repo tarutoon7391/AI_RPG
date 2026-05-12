@@ -81,6 +81,10 @@
   const REWARD_GAIN_LOG_DELAY_MS = 600;
   const LEVEL_UP_POST_DELAY_MS = 600;
   const PERMANENT_BONUS_POST_DELAY_MS = 500;
+  const BATTLE_SYNC_TIMEOUT_MS = 3000;
+  const MAX_BATTLE_SYNC_RETRIES = 3;
+  const BATTLE_SYNC_RETRY_DELAY_MS = 800;
+  const RETRY_BACKOFF_BASE = 2;
   const EFFECT_ICON_MAP = {
     poison: '🟣',
     speed_up: '⚡',
@@ -158,6 +162,7 @@
     intentionalSocketDisconnect: false,
     wasDisconnectedInBattle: false,
     reconnectNoticePending: false,
+    pendingBattleSyncCheck: false,
   };
 
   const els = {
@@ -924,7 +929,7 @@
     state.socket = io({
       withCredentials: true,
       reconnection: true,
-      reconnectionAttempts: Infinity,
+      reconnectionAttempts: 20,
       reconnectionDelay: 500,
       reconnectionDelayMax: 2000,
       timeout: 10000,
@@ -940,6 +945,7 @@
         state.reconnectNoticePending = true;
         addBattleLog('再接続しました。状態を同期しています...');
       }
+      state.pendingBattleSyncCheck = true;
       // 再接続後、一定時間内にサーバーからイベントが来なければバトル状態を確認する
       // （サーバーが battle:turn を送信済みでもソケット切断中で届いていない場合をカバー）
       const sessionIdAtConnect = state.battleSessionId;
@@ -949,10 +955,11 @@
         if (sessionIdAtConnect !== state.battleSessionId) return;
         // サーバーからの応答が届かなかった可能性があるため状態確認を要求する
         if (!state.socket || !state.socket.connected) return;
+        if (!state.pendingBattleSyncCheck) return;
         if (!state.activeBattleTurn && state.battleState) {
           state.socket.emit('battle:sync');
         }
-      }, 3000);
+      }, BATTLE_SYNC_TIMEOUT_MS);
       state.socket.emit('battle:sync');
     });
 
@@ -969,6 +976,7 @@
     // battle:sync の応答を処理
     state.socket.on('battle:syncResult', (data) => {
       if (data.exists) {
+        state.pendingBattleSyncCheck = false;
         state.battleSyncRetryCount = 0;
         if (data.state) {
           state.battleState = data.state;
@@ -991,15 +999,19 @@
           state.reconnectNoticePending = false;
         }
       } else {
+        state.pendingBattleSyncCheck = false;
         if (!state.battleState || state.pendingBattleEnd) return;
-        if (state.battleSyncRetryCount < 1 && state.socket?.connected) {
+        if (state.battleSyncRetryCount < MAX_BATTLE_SYNC_RETRIES && state.socket?.connected) {
           state.battleSyncRetryCount += 1;
+          const retryDelayMs = BATTLE_SYNC_RETRY_DELAY_MS
+            * (RETRY_BACKOFF_BASE ** (state.battleSyncRetryCount - 1));
+          state.pendingBattleSyncCheck = true;
           clearTimeout(state.battleSyncTimer);
           state.battleSyncTimer = setTimeout(() => {
             if (state.socket?.connected && state.battleState && !state.pendingBattleEnd) {
               state.socket.emit('battle:sync');
             }
-          }, 800);
+          }, retryDelayMs);
           return;
         }
         addBattleLog('バトルセッションが切れました。「冒険へ戻る」を押してください。');
@@ -1015,6 +1027,7 @@
         state.battleSyncRetryCount = 0;
         state.wasDisconnectedInBattle = false;
         state.reconnectNoticePending = false;
+        state.pendingBattleSyncCheck = false;
         const nextSessionId = state.battleSessionId + 1;
         state.battleSessionId = nextSessionId;
         closeMiniPopup();
@@ -1092,6 +1105,7 @@
     state.wasDisconnectedInBattle = false;
     state.intentionalSocketDisconnect = false;
     state.reconnectNoticePending = false;
+    state.pendingBattleSyncCheck = false;
     clearTimeout(state.battleSyncTimer);
     releasePendingWaits();
     closeMiniPopup();

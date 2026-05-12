@@ -678,9 +678,9 @@ function buildTurnPayloadWithRewards(battleState, turnResult) {
   };
 }
 
-function isBattleAwaitingPlayerAction(battleState) {
+function isBattleInProgress(battleState) {
   if (!battleState || !battleState.player) return false;
-  if ((battleState.player.hp || 0) <= 0) return false;
+  if (battleState.player.hp === null || battleState.player.hp === undefined || battleState.player.hp <= 0) return false;
   const aliveMonsters = (battleState.monsters || []).filter((m) => m && m.hp > 0 && !m.escaped);
   return aliveMonsters.length > 0;
 }
@@ -1044,7 +1044,7 @@ function registerSocketHandlers(io) {
           turn: currentBattle.turn,
           state: getBattleState(currentBattle),
           playerSkills: currentBattle.player.skills || [],
-          awaitingPlayerAction: isBattleAwaitingPlayerAction(currentBattle),
+          awaitingPlayerAction: isBattleInProgress(currentBattle),
         });
       }
       if (typeof ack === 'function') ack({ ok: true });
