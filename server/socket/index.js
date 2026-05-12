@@ -7,6 +7,7 @@
 //     - room:leave          : 部屋退出リクエスト
 //     - battle:startRequest : バトル開始リクエスト（シングルプレイ）
 //     - battle:action       : バトル中の行動送信
+//     - battle:sync         : 再接続後のバトル状態同期リクエスト
 //     - battle:ready        : バトル準備完了通知
 //
 //   サーバー → クライアント
@@ -14,6 +15,7 @@
 //     - battle:start        : バトル開始
 //     - battle:turn         : ターン進行通知
 //     - battle:end          : バトル終了
+//     - battle:syncResult   : battle:sync の応答（バトル状態の存在確認）
 //     - player:joined       : プレイヤー参加通知
 //     - player:left         : プレイヤー退出通知
 
@@ -30,9 +32,9 @@ const {
   syncJobProgress,
 } = require('../services/skillProgression');
 
-// socketId → battleState のインメモリストア
+// userId → battleState のインメモリストア（ソケット再接続後もバトル状態を保持するために userId をキーとして使用）
 const activeBattles = new Map();
-// socketId → ダンジョン進行状態
+// userId → ダンジョン進行状態
 const activeDungeonRuns = new Map();
 
 // バトル終了通知の遅延（ms）
@@ -397,7 +399,7 @@ async function finalizeBattleResult({
     }
   }
 
-  const runState = activeDungeonRuns.get(socket.id);
+  const runState = activeDungeonRuns.get(userId);
   const baseRun = runState || {
     dungeonId: battleState.dungeonId,
     floor: battleState.floor,
@@ -409,7 +411,7 @@ async function finalizeBattleResult({
   if (result === 'win') {
     baseRun.totalExp = (Number(baseRun.totalExp) || 0) + rewards.exp;
     baseRun.totalMoney = (Number(baseRun.totalMoney) || 0) + rewards.money;
-    activeDungeonRuns.set(socket.id, baseRun);
+    activeDungeonRuns.set(userId, baseRun);
   }
 
   const shouldAdvanceEncounter = result === 'win'
@@ -421,8 +423,8 @@ async function finalizeBattleResult({
     const nextEncounterIndex = baseRun.encounterIndex + 1;
     const monsters = await buildEncounterMonsters(baseRun.dungeonId, nextEncounterIndex, baseRun.floor);
     if (!monsters.length) {
-      activeBattles.delete(socket.id);
-      activeDungeonRuns.delete(socket.id);
+      activeBattles.delete(userId);
+      activeDungeonRuns.delete(userId);
       socket.emit('battle:end', {
         result: 'win',
         rewards,
@@ -464,8 +466,8 @@ async function finalizeBattleResult({
     // バフ・状態異常は新しい戦闘でリセット（ターン状態の引き継ぎを防ぐ）
     nextBattleState.player.buffs = [];
     nextBattleState.player.statusEffects = [];
-    activeBattles.set(socket.id, nextBattleState);
-    activeDungeonRuns.set(socket.id, {
+    activeBattles.set(userId, nextBattleState);
+    activeDungeonRuns.set(userId, {
       ...baseRun,
       encounterIndex: nextEncounterIndex,
     });
@@ -500,8 +502,8 @@ async function finalizeBattleResult({
     return;
   }
 
-  activeBattles.delete(socket.id);
-  activeDungeonRuns.delete(socket.id);
+  activeBattles.delete(userId);
+  activeDungeonRuns.delete(userId);
   const endPayload = {
     result,
     rewards,
@@ -619,8 +621,8 @@ function registerSocketHandlers(io) {
         battleState.player.buffs = [];
         battleState.player.statusEffects = [];
 
-        activeBattles.set(socket.id, battleState);
-        activeDungeonRuns.set(socket.id, {
+        activeBattles.set(userId, battleState);
+        activeDungeonRuns.set(userId, {
           dungeonId: safeDungeonId,
           floor: safeFloor,
           encounterIndex,
@@ -669,8 +671,10 @@ function registerSocketHandlers(io) {
       // eslint-disable-next-line no-console
       console.log('[socket] battle:action', payload);
 
-      const battleState = activeBattles.get(socket.id);
+      const battleState = activeBattles.get(userId);
       if (!battleState) {
+        // バトル状態が存在しない場合はエラーを通知してボタンを復旧できるようにする
+        socket.emit('battle:error', { message: 'バトルセッションが切れました。「冒険へ戻る」を押してください。' });
         if (typeof ack === 'function') ack({ ok: false, message: 'バトルが開始されていません' });
         return;
       }
@@ -750,6 +754,19 @@ function registerSocketHandlers(io) {
       if (typeof ack === 'function') ack({ ok: true });
     });
 
+    // ソケット再接続後のバトル状態同期リクエスト
+    socket.on('battle:sync', (payload, ack) => {
+      // eslint-disable-next-line no-console
+      console.log('[socket] battle:sync userId=', userId);
+      const currentBattle = activeBattles.get(userId);
+      if (!currentBattle) {
+        socket.emit('battle:syncResult', { exists: false });
+      } else {
+        socket.emit('battle:syncResult', { exists: true });
+      }
+      if (typeof ack === 'function') ack({ ok: true });
+    });
+
     socket.on('battle:ready', (payload, ack) => {
       // eslint-disable-next-line no-console
       console.log('[socket] battle:ready', payload);
@@ -759,10 +776,10 @@ function registerSocketHandlers(io) {
     });
 
     socket.on('disconnect', (reason) => {
-      activeBattles.delete(socket.id);
-      activeDungeonRuns.delete(socket.id);
+      // userId キーで管理しているためソケット切断時に即座に削除しない
+      // （再接続時にバトル状態を引き継げるようにする）
       // eslint-disable-next-line no-console
-      console.log(`[socket] 切断: socketId=${socket.id} reason=${reason}`);
+      console.log(`[socket] 切断: socketId=${socket.id} userId=${userId || '匿名'} reason=${reason}`);
     });
   });
 }

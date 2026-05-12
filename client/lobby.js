@@ -146,6 +146,7 @@
     pendingWaits: new Set(),
     activeBattleTurn: false,
     resumeFromBackground: false,
+    battleSyncTimer: null,
   };
 
   const els = {
@@ -792,6 +793,7 @@
   }
 
   function returnToLobbyFromBattle() {
+    clearTimeout(state.battleSyncTimer);
     hideBattleResultOverlay();
     setBattleVisible(false);
     state.battleState = null;
@@ -882,7 +884,43 @@
     if (state.socket) return;
     state.socket = io({ withCredentials: true });
 
+    // ソケット再接続時のバトル状態リカバリ処理
+    state.socket.on('connect', () => {
+      if (!state.battleState || state.pendingBattleEnd) return;
+      // 再接続後、一定時間内にサーバーからイベントが来なければバトル状態を確認する
+      // （サーバーが battle:turn を送信済みでもソケット切断中で届いていない場合をカバー）
+      const sessionIdAtConnect = state.battleSessionId;
+      clearTimeout(state.battleSyncTimer);
+      state.battleSyncTimer = setTimeout(() => {
+        // タイムアウト中にセッションが変わっていたら何もしない
+        if (sessionIdAtConnect !== state.battleSessionId) return;
+        // ターン処理中でなく、かつボタンが無効なまま固まっている（waitingAction=false）場合、
+        // サーバーからの応答が届かなかった可能性があるため状態確認を要求する
+        if (!state.activeBattleTurn && !state.waitingAction && state.battleState) {
+          state.socket.emit('battle:sync');
+        }
+      }, 3000);
+    });
+
+    // battle:sync の応答を処理
+    state.socket.on('battle:syncResult', (data) => {
+      if (data.exists) {
+        // サーバーにバトルが残っている場合、ターン処理中でなくボタンが無効なら復旧する
+        if (!state.activeBattleTurn && !state.waitingAction && isBattleContinuable()) {
+          addBattleLog('接続が復帰しました。コマンドを選択してください。');
+          state.waitingAction = true;
+          setCommandEnabled(true);
+        }
+      } else {
+        // サーバーにバトルが存在しない（切断中に終了した可能性）
+        addBattleLog('バトルセッションが切れました。「冒険へ戻る」を押してください。');
+        state.waitingAction = false;
+        setCommandEnabled(false);
+      }
+    });
+
     state.socket.on('battle:start', (data) => {
+      clearTimeout(state.battleSyncTimer);
       queueBattleTask(() => {
         const nextSessionId = state.battleSessionId + 1;
         state.battleSessionId = nextSessionId;
@@ -917,6 +955,7 @@
     });
 
     state.socket.on('battle:turn', (data) => {
+      clearTimeout(state.battleSyncTimer);
       queueBattleTask(() => processBattleTurn(data, state.battleSessionId), (err) => {
         console.error('[battle:turn] 処理失敗:', err);
         addBattleLog('バトル処理でエラーが発生しました');
@@ -928,6 +967,7 @@
     });
 
     state.socket.on('battle:end', (data) => {
+      clearTimeout(state.battleSyncTimer);
       queueBattleTask(() => processBattleEnd(data, state.battleSessionId), (err) => {
         console.error('[battle:end] 処理失敗:', err);
         addBattleLog('終了処理でエラーが発生しました');
@@ -935,6 +975,7 @@
     });
 
     state.socket.on('battle:error', (data) => {
+      clearTimeout(state.battleSyncTimer);
       addBattleLog(`エラー: ${data.message || '不明なエラー'}`);
       state.waitingAction = true;
       setCommandEnabled(true);
@@ -956,6 +997,7 @@
     state.battleSessionId = 0;
     state.activeBattleTurn = false;
     state.resumeFromBackground = false;
+    clearTimeout(state.battleSyncTimer);
     releasePendingWaits();
     closeMiniPopup();
     hideBattleResultOverlay();
@@ -970,12 +1012,17 @@
     hideSkillModal();
     state.resumeFromBackground = state.activeBattleTurn;
     if (state.activeBattleTurn) {
+      // ターン処理中のアニメーション待機をすべて解放して処理を進める
       releasePendingWaits();
     }
     if (state.socket && !state.socket.connected) {
+      // 切断している場合は再接続する（connect イベント内でリカバリタイマーが起動する）
       state.socket.connect();
     }
-    if (isBattleContinuable() && state.waitingAction) {
+    if (isBattleContinuable() && state.waitingAction && !state.activeBattleTurn) {
+      // プレイヤーターン待ちかつターン処理中でない場合にボタンを有効化する
+      // （activeBattleTurn=true の場合は releasePendingWaits() でターン処理を進め、
+      //   processBattleTurn の終了時に setCommandEnabled が呼ばれる）
       setCommandEnabled(true);
     }
   }
@@ -1931,21 +1978,24 @@
       }
     });
 
-    els.commandButtons.forEach((btn) => {
-      btn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (!state.waitingAction) return;
-        const cmd = btn.dataset.command;
-        if (cmd === 'skill') {
-          openSkillPicker();
-          return;
-        }
-        if (cmd === 'attack' || cmd === 'capture') {
-          requestBattleAction(cmd, null, btn);
-          return;
-        }
-        emitBattleAction(cmd, null, null);
-      });
+    // コマンドボタンへのイベントは委譲方式で登録する
+    // （DOM要素が差し替えられた場合でもリスナーが有効なまま維持される）
+    els.battleView.addEventListener('click', (event) => {
+      const btn = event.target.closest('.cmd-btn');
+      if (!btn) return;
+      event.stopPropagation();
+      if (!state.waitingAction) return;
+      if (btn.disabled) return;
+      const cmd = btn.dataset.command;
+      if (cmd === 'skill') {
+        openSkillPicker();
+        return;
+      }
+      if (cmd === 'attack' || cmd === 'capture') {
+        requestBattleAction(cmd, null, btn);
+        return;
+      }
+      emitBattleAction(cmd, null, null);
     });
 
     els.backToHomeBtn.addEventListener('click', returnToLobbyFromBattle);
@@ -1958,6 +2008,10 @@
     });
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    // iOS の Back/Forward Cache（bfcache）からの復帰時にも visibilitychange に相当する処理を実行する
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) handleVisibilityChange();
+    });
     window.addEventListener('resize', closeMiniPopup);
     window.addEventListener('scroll', closeMiniPopup, true);
   }
