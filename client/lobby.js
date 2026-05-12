@@ -1169,7 +1169,7 @@
     if (!battle || !action) return;
 
     if (action.actorType === 'player' && action.mpAfterAction != null && battle.player) {
-      battle.player.mp = Math.max(0, Number(action.mpAfterAction) || 0);
+      battle.player.mp = Math.max(0, Number(action.mpAfterAction));
     } else if (action.actorType === 'monster' && action.actorId != null && action.mpAfterAction != null) {
       const actingMonster = (battle.monsters || []).find(
         (monster) => monster && (
@@ -1178,7 +1178,7 @@
         )
       );
       if (actingMonster) {
-        actingMonster.mp = Math.max(0, Number(action.mpAfterAction) || 0);
+        actingMonster.mp = Math.max(0, Number(action.mpAfterAction));
       }
     }
 

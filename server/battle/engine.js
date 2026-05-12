@@ -553,6 +553,7 @@ function processTurn(battleState, playerAction, options = {}) {
         if (playerAction.actionType === 'skill' || playerAction.actionType === 'attack') {
           const skill = playerAction.skill || NORMAL_ATTACK;
           const actualSkill = restriction.forceNormalAttack ? NORMAL_ATTACK : skill;
+          const currentMp = Number(player.mp) || 0;
           const requiredMp = Number(actualSkill.mp_cost) || 0;
 
           if (restriction.selfAttack) {
@@ -566,7 +567,7 @@ function processTurn(battleState, playerAction, options = {}) {
               isCrit: false, isSupercrit: false, missed: false,
               message: `${player.name} は混乱して自分を攻撃した！ ${damage} のダメージ！`,
             });
-          } else if (requiredMp > (Number(player.mp) || 0)) {
+          } else if (requiredMp > currentMp) {
             actions.push({
               actorType: 'player', actorId: player.id,
               actionType: 'skip', targetId: null,
@@ -585,7 +586,7 @@ function processTurn(battleState, playerAction, options = {}) {
               message: '対象がいない！',
             });
           } else {
-            player.mp = Math.max(0, player.mp - requiredMp);
+            player.mp = Math.max(0, currentMp - requiredMp);
 
             if (actualSkill.effect_type === 'self_hp_cost') {
               const selfCost = Math.floor(player.max_hp * ((Number(actualSkill.effect_value) || 0) / 100));
