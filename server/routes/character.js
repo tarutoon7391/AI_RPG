@@ -59,7 +59,7 @@ router.get('/me', requireAuth, async (req, res) => {
 
     // キャラクター本体
     const charResult = await db.query(
-      `SELECT c.*, j.name AS job_name, cj.level AS job_level, u.username
+      `SELECT c.*, j.name AS job_name, cj.level AS job_level, COALESCE(cj.exp, 0) AS job_exp, u.username
        FROM characters c
        INNER JOIN users u ON u.id = c.user_id
        LEFT JOIN character_jobs cj ON cj.character_id = c.id AND cj.job_id = c.current_job_id
