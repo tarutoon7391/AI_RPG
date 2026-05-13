@@ -23,6 +23,11 @@ const characterJobRateLimit = createRateLimiter({
   maxRequests: 30,
   keyGenerator: (req) => `user:${req.session && req.session.userId ? req.session.userId : req.ip || 'unknown'}`,
 });
+const characterEquipmentRateLimit = createRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+  keyGenerator: (req) => `user:${req.session && req.session.userId ? req.session.userId : req.ip || 'unknown'}`,
+});
 
 async function fetchSkillsByCharacterJobId(characterId, jobId) {
   if (!characterId || !jobId) return [];
@@ -182,7 +187,7 @@ router.post('/job', requireAuth, characterJobRateLimit, async (req, res) => {
 });
 
 // POST /api/character/equipment - 装備状態保存
-router.post('/equipment', requireAuth, async (req, res) => {
+router.post('/equipment', requireAuth, characterEquipmentRateLimit, async (req, res) => {
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
