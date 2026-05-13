@@ -8,6 +8,7 @@
 //     - battle:startRequest : バトル開始リクエスト（シングルプレイ）
 //     - battle:action       : バトル中の行動送信
 //     - battle:sync         : 再接続後のバトル状態同期リクエスト
+//     - battle:returnLobby  : バトル終了後にロビーへ戻る確定リクエスト
 //     - battle:ready        : バトル準備完了通知
 //
 //   サーバー → クライアント
@@ -32,12 +33,17 @@ const {
   syncJobProgress,
   JOB_LEVEL_GROWTH_TABLE,
 } = require('../services/skillProgression');
-const { applyEquipmentBonusToCharacter } = require('../services/equipmentStats');
+const {
+  applyEquipmentBonusToCharacter,
+  calcEquipmentBonus,
+} = require('../services/equipmentStats');
 
 // userId → battleState のインメモリストア（ソケット再接続後もバトル状態を保持するために userId をキーとして使用）
 const activeBattles = new Map();
 // userId → ダンジョン進行状態
 const activeDungeonRuns = new Map();
+// userId → ロビー帰還待ちの終了バトル情報
+const pendingLobbyReturns = new Map();
 
 // バトル終了通知の遅延（ms）
 const BATTLE_END_DELAY = 300;
@@ -54,6 +60,25 @@ function toInt(value, fallback = 0) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.floor(num);
+}
+
+function calcStoredHpForFullRecovery(character) {
+  const bonus = calcEquipmentBonus(character?.equipped_items);
+  const effectiveMaxHp = Math.max(1, toInt(character?.max_hp, 0) + toInt(bonus.maxHp, 0));
+  return Math.max(0, effectiveMaxHp - toInt(bonus.hp, 0));
+}
+
+function calcStoredMpFromEffective(character, effectiveMp) {
+  const bonus = calcEquipmentBonus(character?.equipped_items);
+  const effectiveMaxMp = Math.max(0, toInt(character?.max_mp, 0) + toInt(bonus.maxMp, 0));
+  const safeEffectiveMp = Math.max(0, Math.min(effectiveMaxMp, toInt(effectiveMp, 0)));
+  return Math.max(0, safeEffectiveMp - toInt(bonus.mp, 0));
+}
+
+function calcStoredMpForFullRecovery(character) {
+  const bonus = calcEquipmentBonus(character?.equipped_items);
+  const effectiveMaxMp = Math.max(0, toInt(character?.max_mp, 0) + toInt(bonus.maxMp, 0));
+  return Math.max(0, effectiveMaxMp - toInt(bonus.mp, 0));
 }
 
 function normalizeGrowthMap(value) {
@@ -164,10 +189,41 @@ async function fetchJobSkills(jobId) {
   return result.rows || [];
 }
 
-async function applyBattleRewards(userId, rewards) {
+async function recoverCharacterResources(executor, {
+  characterId,
+  restoreMp = true,
+  effectiveMpCap = null,
+}) {
+  if (!characterId) return;
+  const resourceResult = await executor.query(
+    `SELECT max_hp, max_mp, mp, equipped_items
+     FROM characters
+     WHERE id = $1
+     LIMIT 1`,
+    [characterId]
+  );
+  if (resourceResult.rowCount === 0) return;
+  const resourceRow = resourceResult.rows[0];
+  const nextHp = calcStoredHpForFullRecovery(resourceRow);
+  const currentEffectiveMp = Math.max(0, toInt(resourceRow.mp, 0) + toInt(calcEquipmentBonus(resourceRow.equipped_items).mp, 0));
+  const mpBase = effectiveMpCap === null || effectiveMpCap === undefined ? currentEffectiveMp : effectiveMpCap;
+  const nextMp = restoreMp
+    ? calcStoredMpForFullRecovery(resourceRow)
+    : calcStoredMpFromEffective(resourceRow, mpBase);
+  await executor.query(
+    `UPDATE characters
+     SET hp = $2, mp = $3, updated_at = NOW()
+     WHERE id = $1`,
+    [characterId, nextHp, nextMp]
+  );
+}
+
+async function applyBattleRewards(userId, rewards, options = {}) {
   if (!userId || !rewards || (rewards.exp <= 0 && rewards.money <= 0)) {
     return null;
   }
+  const restoreMp = options.restoreMp !== false;
+  const effectiveMpCap = options.effectiveMpCap;
 
   const client = await db.pool.connect();
   try {
@@ -211,23 +267,12 @@ async function applyBattleRewards(userId, rewards) {
         permanentBonusGained: (progress.statGrowth && progress.statGrowth.permanentBonusGained) || null,
       };
 
-      // レベルアップ時はHP・MPが applyLevelGrowthToCharacter 内で全回復済み
-      // 戦闘終了時（勝利・逃走問わず）に必ずHPを最大値まで全回復してからロビーに戻る
-      await client.query(
-        `UPDATE characters
-         SET hp = max_hp, mp = max_mp, updated_at = NOW()
-         WHERE id = $1`,
-        [char.id]
-      );
-    } else {
-      // 職業なしの場合も戦闘終了時はHP全回復
-      await client.query(
-        `UPDATE characters
-         SET hp = max_hp, mp = max_mp, updated_at = NOW()
-         WHERE id = $1`,
-        [char.id]
-      );
     }
+    await recoverCharacterResources(client, {
+      characterId: char.id,
+      restoreMp,
+      effectiveMpCap,
+    });
 
     await client.query('COMMIT');
     return { levelUp, skills };
@@ -237,6 +282,39 @@ async function applyBattleRewards(userId, rewards) {
     } catch (rollbackError) {
       // eslint-disable-next-line no-console
       console.error('[socket] 報酬更新ロールバックエラー:', rollbackError);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function recoverCharacterHpOnly(userId, effectiveMpCap = null) {
+  if (!userId) return;
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const charResult = await client.query(
+      `SELECT id
+       FROM characters
+       WHERE user_id = $1
+       LIMIT 1`,
+      [userId]
+    );
+    if (charResult.rowCount > 0) {
+      await recoverCharacterResources(client, {
+        characterId: charResult.rows[0].id,
+        restoreMp: false,
+        effectiveMpCap,
+      });
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      // eslint-disable-next-line no-console
+      console.error('[socket] HP回復ロールバックエラー:', rollbackError);
     }
     throw err;
   } finally {
@@ -685,6 +763,7 @@ function buildTurnPayloadWithRewards(battleState, turnResult) {
 
 function isBattleInProgress(battleState) {
   if (!battleState || !battleState.player) return false;
+  if (battleState.finished) return false;
   if (battleState.player.hp === null || battleState.player.hp === undefined || battleState.player.hp <= 0) return false;
   const aliveMonsters = (battleState.monsters || []).filter((m) => m && m.hp > 0 && !m.escaped);
   return aliveMonsters.length > 0;
@@ -712,6 +791,7 @@ async function finalizeBattleResult({
   battleState,
   result,
 }) {
+  const normalizedResult = result === 'enemy_escape' ? 'lose' : result;
   const pendingRewards = battleState?.rewardProgress
     ? {
       exp: toInt(battleState.rewardProgress.pendingExp, 0),
@@ -725,7 +805,7 @@ async function finalizeBattleResult({
     }
     : { exp: 0, money: 0 };
   const allMonstersDefeated = areAllMonstersDefeated(battleState?.monsters || []);
-  const rewards = (result === 'win' && allMonstersDefeated)
+  const rewards = (normalizedResult === 'win' && allMonstersDefeated) || normalizedResult === 'escape'
     ? {
       exp: Math.max(0, distributedRewards.exp + pendingRewards.exp),
       money: Math.max(0, distributedRewards.money + pendingRewards.money),
@@ -733,33 +813,6 @@ async function finalizeBattleResult({
     : { exp: 0, money: 0 };
 
   let rewardResult = null;
-  if (result === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
-    try {
-      rewardResult = await applyBattleRewards(userId, rewards);
-      // レベルアップ/習得ログは戦闘中リアルタイムで表示済みのため、battle:end では再表示しない
-      if (rewardResult) {
-        rewardResult = { ...rewardResult, levelUp: null };
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[socket] 報酬更新エラー:', err);
-    }
-  }
-
-  // 戦闘終了時（勝利・逃走・敗北問わず）にHPを最大値まで全回復する
-  // ※ applyBattleRewards（勝利でレポート付き）の中で既にHP回復している場合はスキップしても問題なし
-  if (userId && !rewardResult) {
-    try {
-      await db.query(
-        `UPDATE characters SET hp = max_hp, mp = max_mp, updated_at = NOW()
-         WHERE user_id = $1`,
-        [userId]
-      );
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[socket] HP全回復エラー:', err);
-    }
-  }
 
   const runState = activeDungeonRuns.get(userId);
   const baseRun = runState || {
@@ -770,18 +823,31 @@ async function finalizeBattleResult({
     totalExp: 0,
     totalMoney: 0,
   };
-  if (result === 'win') {
+  if (normalizedResult === 'win') {
     baseRun.totalExp = (Number(baseRun.totalExp) || 0) + rewards.exp;
     baseRun.totalMoney = (Number(baseRun.totalMoney) || 0) + rewards.money;
     activeDungeonRuns.set(userId, baseRun);
   }
 
-  const shouldAdvanceEncounter = result === 'win'
+  const shouldAdvanceEncounter = normalizedResult === 'win'
     && baseRun
     && Number(baseRun.dungeonId) === 1
     && baseRun.encounterIndex + 1 < BEGINNER_MEADOW_ENCOUNTER_TOTAL;
 
   if (shouldAdvanceEncounter) {
+    if (normalizedResult === 'win' && userId && (rewards.exp > 0 || rewards.money > 0)) {
+      try {
+        rewardResult = await applyBattleRewards(userId, rewards, { restoreMp: true });
+        // レベルアップ/習得ログは戦闘中リアルタイムで表示済みのため、battle:end では再表示しない
+        if (rewardResult) {
+          rewardResult = { ...rewardResult, levelUp: null };
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[socket] 報酬更新エラー:', err);
+      }
+    }
+
     const nextEncounterIndex = baseRun.encounterIndex + 1;
     const monsters = await buildEncounterMonsters(baseRun.dungeonId, nextEncounterIndex, baseRun.floor);
     if (!monsters.length) {
@@ -850,27 +916,39 @@ async function finalizeBattleResult({
     return;
   }
 
-  activeBattles.delete(userId);
-  activeDungeonRuns.delete(userId);
-  const endPayload = {
-    result,
-    rewards,
-    cumulativeRewards: {
+  const cumulativeRewards = normalizedResult === 'lose'
+    ? { exp: 0, money: 0 }
+    : {
       exp: Number(baseRun.totalExp) || 0,
       money: Number(baseRun.totalMoney) || 0,
-    },
+    };
+  if (normalizedResult === 'escape') {
+    cumulativeRewards.exp += rewards.exp;
+    cumulativeRewards.money += rewards.money;
+  }
+
+  battleState.finished = true;
+  if (userId) {
+    pendingLobbyReturns.set(userId, {
+      result: normalizedResult,
+      rewards,
+      effectiveMpAtBattleEnd: toInt(battleState?.player?.mp, 0),
+    });
+  }
+  const endPayload = {
+    result: normalizedResult,
+    rewards,
+    cumulativeRewards,
     reachedEncounter: (Number(baseRun.encounterIndex) || 0) + 1,
-    message: result === 'win' && Number(baseRun.dungeonId) === 1
+    message: normalizedResult === 'win' && Number(baseRun.dungeonId) === 1
       ? 'はじまりの草原を踏破した！'
-      : getBattleEndMessage(result),
-    playerSkills: rewardResult && Array.isArray(rewardResult.skills)
-      ? rewardResult.skills
-      : battleState.player.skills || [],
-    levelUp: rewardResult ? rewardResult.levelUp : null,
-    victoryMessage: result === 'win' ? buildBattleVictoryMessage(battleState.monsters, rewards) : null,
+      : getBattleEndMessage(normalizedResult),
+    playerSkills: battleState.player.skills || [],
+    levelUp: null,
+    victoryMessage: normalizedResult === 'win' ? buildBattleVictoryMessage(battleState.monsters, rewards) : null,
   };
 
-  if (result === 'escape') {
+  if (normalizedResult === 'escape') {
     socket.emit('battle:end', endPayload);
   } else {
     setTimeout(() => {
@@ -945,6 +1023,7 @@ function registerSocketHandlers(io) {
         const { dungeonId, floor } = payload || {};
         const safeDungeonId = Number(dungeonId) || 1;
         const safeFloor = Number(floor) || 1;
+        pendingLobbyReturns.delete(userId);
         const character = await loadCharacter(userId);
         if (!character) {
           socket.emit('battle:error', { message: 'キャラクターが見つかりません' });
@@ -1008,7 +1087,7 @@ function registerSocketHandlers(io) {
       const battleState = activeBattles.get(userId);
       if (!battleState) {
         // バトル状態が存在しない場合はエラーを通知してボタンを復旧できるようにする
-        socket.emit('battle:error', { message: 'バトルセッションが切れました。「冒険へ戻る」を押してください。' });
+        socket.emit('battle:error', { message: 'バトルセッションが切れました。「ロビーに戻る」を押してください。' });
         if (typeof ack === 'function') ack({ ok: false, message: 'バトルが開始されていません' });
         return;
       }
@@ -1064,10 +1143,43 @@ function registerSocketHandlers(io) {
       if (typeof ack === 'function') ack({ ok: true });
     });
 
+    socket.on('battle:returnLobby', async (payload, ack) => {
+      if (!userId) {
+        if (typeof ack === 'function') ack({ ok: false, message: 'ログインが必要です' });
+        return;
+      }
+      const pending = pendingLobbyReturns.get(userId);
+      if (!pending) {
+        if (typeof ack === 'function') ack({ ok: false, message: '帰還可能なバトル結果がありません' });
+        return;
+      }
+      activeBattles.delete(userId);
+      activeDungeonRuns.delete(userId);
+      pendingLobbyReturns.delete(userId);
+      try {
+        const shouldApplyRewards = (pending.result === 'win' || pending.result === 'escape')
+          && (pending.rewards?.exp > 0 || pending.rewards?.money > 0);
+        if (shouldApplyRewards) {
+          await applyBattleRewards(userId, pending.rewards, {
+            restoreMp: false,
+            effectiveMpCap: pending.effectiveMpAtBattleEnd,
+          });
+        } else {
+          await recoverCharacterHpOnly(userId, pending.effectiveMpAtBattleEnd);
+        }
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[socket] battle:returnLobby エラー:', err);
+        if (typeof ack === 'function') ack({ ok: false, message: 'ロビー帰還処理に失敗しました' });
+      }
+    });
+
     socket.on('battle:abandon', (payload, ack) => {
       if (userId) {
         activeBattles.delete(userId);
         activeDungeonRuns.delete(userId);
+        pendingLobbyReturns.delete(userId);
       }
       if (typeof ack === 'function') ack({ ok: true });
     });

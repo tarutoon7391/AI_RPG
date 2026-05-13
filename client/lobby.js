@@ -163,6 +163,7 @@
     wasDisconnectedInBattle: false,
     reconnectNoticePending: false,
     pendingBattleSyncCheck: false,
+    returningToLobby: false,
   };
 
   const els = {
@@ -246,7 +247,6 @@
     playerMpText: document.getElementById('player-mp-text'),
     playerMpBar: document.getElementById('player-mp-bar'),
     battleLog: document.getElementById('battle-log'),
-    backToHomeBtn: document.getElementById('back-to-home-btn'),
     commandButtons: document.querySelectorAll('.cmd-btn'),
     miniPopup: document.getElementById('mini-popup'),
     battleResultOverlay: document.getElementById('battle-result-overlay'),
@@ -833,18 +833,45 @@
   }
 
   async function returnToLobbyFromBattle() {
-    if (state.socket && state.battleState) {
-      state.socket.emit('battle:abandon', {}, () => {});
+    if (state.returningToLobby || !state.pendingBattleEnd) return;
+    if (!state.socket || !state.socket.connected) {
+      addBattleLog('通信エラー: ロビーへ戻る処理に失敗しました。再接続後に再試行してください。');
+      return;
     }
-    clearTimeout(state.battleSyncTimer);
-    hideBattleResultOverlay();
-    setBattleVisible(false);
-    state.battleState = null;
-    state.waitingAction = false;
-    state.pendingBattleEnd = false;
-    setCommandEnabled(false);
-    setActiveTab('adventure');
-    await loadCharacterProfile();
+    state.returningToLobby = true;
+    els.battleResultLobbyBtn.disabled = true;
+    try {
+      const result = await new Promise((resolve) => {
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          resolve({ ok: false, message: 'タイムアウトしました' });
+        }, 10000);
+        state.socket.emit('battle:returnLobby', {}, (res) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve(res || { ok: false, message: 'サーバー応答が不正です' });
+        });
+      });
+      if (!result || result.ok !== true) {
+        addBattleLog(`ロビーへ戻れませんでした: ${result?.message || '不明なエラー'}`);
+        return;
+      }
+      clearTimeout(state.battleSyncTimer);
+      hideBattleResultOverlay();
+      setBattleVisible(false);
+      state.battleState = null;
+      state.waitingAction = false;
+      state.pendingBattleEnd = false;
+      setCommandEnabled(false);
+      setActiveTab('adventure');
+      await loadCharacterProfile();
+    } finally {
+      state.returningToLobby = false;
+      els.battleResultLobbyBtn.disabled = false;
+    }
   }
 
   function showBattleResultOverlay(result, payload = {}) {
@@ -852,6 +879,9 @@
     if (result === 'win') {
       els.battleResultTitle.textContent = 'ダンジョンクリア！';
       els.battleResultSubtitle.textContent = '';
+    } else if (result === 'escape') {
+      els.battleResultTitle.textContent = '逃走成功！';
+      els.battleResultSubtitle.textContent = 'ロビーへ帰還します。';
     } else {
       const reached = toInt(payload.reachedEncounter, 1);
       els.battleResultTitle.textContent = '敗北...';
@@ -1015,7 +1045,7 @@
           }, retryDelayMs);
           return;
         }
-        addBattleLog('バトルセッションが切れました。「冒険へ戻る」を押してください。');
+        addBattleLog('バトルセッションが切れました。「ロビーに戻る」を押してください。');
         state.reconnectNoticePending = false;
         state.waitingAction = false;
         setCommandEnabled(false);
@@ -1104,6 +1134,7 @@
     state.intentionalSocketDisconnect = false;
     state.reconnectNoticePending = false;
     state.pendingBattleSyncCheck = false;
+    state.returningToLobby = false;
     clearTimeout(state.battleSyncTimer);
     releasePendingWaits();
     closeMiniPopup();
@@ -1557,14 +1588,12 @@
         addBattleLog(`スキル『${name}』を習得した！`);
       });
     }
-    if (data.result === 'win') await loadCharacterProfile();
     state.save.progress.beginnerMeadowEncounterIndex = 0;
     persistSave();
-    if (data.result === 'win' || data.result === 'lose') {
+    if (data.result === 'win' || data.result === 'lose' || data.result === 'escape') {
       showBattleResultOverlay(data.result, data);
       return;
     }
-    addBattleLog('「冒険へ戻る」を押すとダンジョン一覧に戻ります。');
   }
 
 
@@ -2129,7 +2158,6 @@
       emitBattleAction(cmd, null, null);
     });
 
-    els.backToHomeBtn.addEventListener('click', returnToLobbyFromBattle);
     els.battleResultLobbyBtn.addEventListener('click', returnToLobbyFromBattle);
 
     document.addEventListener('click', (e) => {
