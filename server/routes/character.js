@@ -239,8 +239,9 @@ router.post('/equipment', requireAuth, characterEquipmentRateLimit, async (req, 
   } catch (err) {
     try {
       await client.query('ROLLBACK');
-    } catch (_rollbackError) {
-      // no-op
+    } catch (rollbackError) {
+      // eslint-disable-next-line no-console
+      console.error('[character.equipment] ロールバックエラー:', rollbackError);
     }
     // eslint-disable-next-line no-console
     console.error('[character.equipment] エラー:', err);

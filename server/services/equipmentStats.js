@@ -131,6 +131,7 @@ function calcEquipmentResourceAdjustment(character, nextEquippedItemsRaw) {
 
   const prevEffectiveHp = clampInt(toInt(characterRow.hp, 0) + prevBonus.hp, 0, prevEffectiveMaxHp);
   const prevEffectiveMp = clampInt(toInt(characterRow.mp, 0) + prevBonus.mp, 0, prevEffectiveMaxMp);
+  // 最大値が上がった場合は新最大まで全回復、下がった場合は新最大までクランプする
   const nextEffectiveHp = nextEffectiveMaxHp > prevEffectiveMaxHp
     ? nextEffectiveMaxHp
     : Math.min(prevEffectiveHp, nextEffectiveMaxHp);
