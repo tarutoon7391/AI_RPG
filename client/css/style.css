@@ -496,11 +496,6 @@ button.secondary,
   white-space: pre-wrap;
 }
 
-.back-home-btn {
-  margin-top: 8px;
-  background: #2f4663;
-}
-
 .modal {
   position: fixed;
   inset: 0;
