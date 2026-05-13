@@ -11,10 +11,13 @@ const {
   syncJobProgress,
   applyJobChangeStats,
 } = require('../services/skillProgression');
+const {
+  normalizeEquippedItems,
+  calcEquipmentResourceAdjustment,
+} = require('../services/equipmentStats');
 
 const router = express.Router();
 const DEFAULT_JOB_LEVEL = 1;
-const EQUIP_SLOT_KEYS = ['head', 'body', 'legs', 'shoes', 'accessory'];
 const characterJobRateLimit = createRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 30,
@@ -41,15 +44,6 @@ async function fetchJobLevelsByCharacterId(characterId) {
     acc[row.job_name] = Number.isFinite(level) && level >= 0 ? Math.round(level) : DEFAULT_JOB_LEVEL;
     return acc;
   }, {});
-}
-
-function normalizeEquippedItems(source) {
-  const normalized = {};
-  const base = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
-  EQUIP_SLOT_KEYS.forEach((slot) => {
-    normalized[slot] = (typeof base[slot] === 'string' && base[slot].trim()) || null;
-  });
-  return normalized;
 }
 
 // GET /api/character/me
@@ -189,27 +183,65 @@ router.post('/job', requireAuth, characterJobRateLimit, async (req, res) => {
 
 // POST /api/character/equipment - 装備状態保存
 router.post('/equipment', requireAuth, async (req, res) => {
+  const client = await db.pool.connect();
   try {
+    await client.query('BEGIN');
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
-    const equippedItems = normalizeEquippedItems(payload.equipment);
-    const result = await db.query(
-      `UPDATE characters
-       SET equipped_items = $1::jsonb, updated_at = NOW()
-       WHERE user_id = $2
-       RETURNING equipped_items`,
-      [JSON.stringify(equippedItems), req.session.userId]
+    const requestedEquipment = normalizeEquippedItems(payload.equipment);
+
+    const currentResult = await client.query(
+      `SELECT id, hp, max_hp, mp, max_mp, equipped_items
+       FROM characters
+       WHERE user_id = $1
+       LIMIT 1
+       FOR UPDATE`,
+      [req.session.userId]
     );
-    if (result.rowCount === 0) {
+    if (currentResult.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'キャラクターが見つかりません' });
     }
+
+    const currentCharacter = currentResult.rows[0];
+    const adjusted = calcEquipmentResourceAdjustment(currentCharacter, requestedEquipment);
+    const result = await client.query(
+      `UPDATE characters
+       SET equipped_items = $2::jsonb,
+           hp = $3,
+           mp = $4,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING equipped_items, hp, max_hp, mp, max_mp`,
+      [
+        currentCharacter.id,
+        JSON.stringify(adjusted.nextEquippedItems),
+        adjusted.nextStoredHp,
+        adjusted.nextStoredMp,
+      ]
+    );
+    await client.query('COMMIT');
+
     return res.json({
       ok: true,
       equipment: normalizeEquippedItems(result.rows[0].equipped_items),
+      resources: {
+        hp: adjusted.nextEffectiveHp,
+        maxHp: adjusted.nextEffectiveMaxHp,
+        mp: adjusted.nextEffectiveMp,
+        maxMp: adjusted.nextEffectiveMaxMp,
+      },
     });
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_rollbackError) {
+      // no-op
+    }
     // eslint-disable-next-line no-console
     console.error('[character.equipment] エラー:', err);
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  } finally {
+    client.release();
   }
 });
 
