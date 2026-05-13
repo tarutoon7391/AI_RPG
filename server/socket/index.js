@@ -472,6 +472,8 @@ function createBattleState({ dungeonId, floor, character, monsters, encounterInd
     rewardProgress: {
       pendingExp: 0,
       pendingMoney: 0,
+      totalExp: 0,
+      totalMoney: 0,
       rewardedMonsterIds: new Set(),
       progression: {
         enabled: !!jobId,
@@ -657,6 +659,8 @@ function applyRealtimeBattleRewards(battleState, actions) {
     }
     rewardProgress.pendingExp = 0;
     rewardProgress.pendingMoney = 0;
+    rewardProgress.totalExp = Math.max(0, toInt(rewardProgress.totalExp, 0) + totalReward.exp);
+    rewardProgress.totalMoney = Math.max(0, toInt(rewardProgress.totalMoney, 0) + totalReward.money);
     const rewardActions = buildRealtimeRewardActions({
       battleState,
       triggerAction: action,
@@ -713,9 +717,18 @@ async function finalizeBattleResult({
       money: toInt(battleState.rewardProgress.pendingMoney, 0),
     }
     : { exp: 0, money: 0 };
+  const distributedRewards = battleState?.rewardProgress
+    ? {
+      exp: toInt(battleState.rewardProgress.totalExp, 0),
+      money: toInt(battleState.rewardProgress.totalMoney, 0),
+    }
+    : { exp: 0, money: 0 };
   const allMonstersDefeated = areAllMonstersDefeated(battleState?.monsters || []);
   const rewards = (result === 'win' && allMonstersDefeated)
-    ? pendingRewards
+    ? {
+      exp: Math.max(0, distributedRewards.exp + pendingRewards.exp),
+      money: Math.max(0, distributedRewards.money + pendingRewards.money),
+    }
     : { exp: 0, money: 0 };
 
   let rewardResult = null;

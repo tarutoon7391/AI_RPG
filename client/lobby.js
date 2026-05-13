@@ -470,6 +470,7 @@
     return {
       name: char.name || state.user?.username || '---',
       level: toInt(char.job_level, 1),
+      jobExp: toInt(char.job_exp, 0),
       totalExp: toInt(char.exp, 0),
       money: toInt(char.money, 0),
       hp: toInt(char.hp, 0),
@@ -584,7 +585,7 @@
     const perm = base.permanentBonus;
     const selectedJob = state.save.character.selectedJobName;
     const level = base.level;
-    const nextExp = calcNextLevelExp(base.totalExp, level);
+    const nextExp = calcNextLevelExp(base.jobExp, level);
 
     els.charName.textContent = base.name;
     els.charJob.textContent = selectedJob;
@@ -1047,9 +1048,6 @@
         updateBattleState();
         setCommandEnabled(awaitingPlayerAction);
         addBattleLog(data.message || 'バトル開始');
-        if (awaitingPlayerAction) {
-          addBattleLog('あなたのターン');
-        }
         setBattleVisible(true);
       }, (err) => {
         console.error('[battle:start] 処理失敗:', err);
@@ -1448,16 +1446,10 @@
         state.playerSkills = data.playerSkills;
       }
       const actions = Array.isArray(data.actions) ? data.actions.filter(Boolean) : [];
-      let enemyTurnShown = false;
 
       for (let actionIndex = 0; actionIndex < actions.length; actionIndex += 1) {
         const action = actions[actionIndex];
         if (sessionId !== state.battleSessionId) return;
-        if (action.actorType === 'monster' && !enemyTurnShown) {
-          addBattleLog('敵のターン');
-          enemyTurnShown = true;
-          await wait(600);
-        }
 
         if (isMonsterDefeatTargetAction(action, visualState)) {
           const defeatedActions = [action];
@@ -1485,10 +1477,10 @@
           continue;
         }
 
-        if (action.specialSkill && action.skillName) {
+        if (action.message) {
+          addBattleLog(action.message, action.specialSkill ? { className: 'battle-log-special' } : {});
+        } else if (action.specialSkill && action.skillName) {
           addBattleLog(action.skillName, { className: 'battle-log-special' });
-        } else if (action.message) {
-          addBattleLog(action.message);
         }
         applyActionToBattleState(visualState, action);
         state.battleState = visualState;
@@ -1508,9 +1500,6 @@
       if (!isBattleContinuable()) return;
       const awaitingPlayerAction = data.awaitingPlayerAction !== false;
       state.waitingAction = awaitingPlayerAction;
-      if (awaitingPlayerAction) {
-        addBattleLog('あなたのターン');
-      }
       setCommandEnabled(awaitingPlayerAction);
     } finally {
       state.activeBattleTurn = false;
@@ -1832,8 +1821,17 @@
       .forEach((skill) => {
         const button = document.createElement('button');
         const mpCost = skill.mp_cost > 0 ? `（MP${skill.mp_cost}）` : '';
+        const desc = typeof skill.description === 'string' ? skill.description.trim() : '';
+        const nameEl = document.createElement('span');
+        const descEl = document.createElement('small');
         button.type = 'button';
-        button.textContent = `${skill.name}${mpCost}`;
+        button.classList.add('skill-option-btn');
+        nameEl.classList.add('skill-option-name');
+        descEl.classList.add('skill-option-description');
+        nameEl.textContent = `${skill.name}${mpCost}`;
+        descEl.textContent = desc;
+        button.appendChild(nameEl);
+        if (desc) button.appendChild(descEl);
         button.addEventListener('click', (event) => {
           event.stopPropagation();
           hideSkillModal();

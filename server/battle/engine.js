@@ -189,6 +189,26 @@ function getCombatantLogName(combatant, monsterNameMap) {
   return combatant.name || '';
 }
 
+function buildAttackActionMessage({
+  actorName,
+  targetName,
+  skillName,
+  damage,
+  missed,
+  ineffective,
+  isCrit,
+  isSupercrit,
+  isNormalAttack = false,
+}) {
+  const safeActorName = actorName || '？？？';
+  const safeTargetName = targetName || '対象';
+  const actionLabel = isNormalAttack ? '攻撃' : (skillName || 'スキル');
+  const head = `${safeActorName}の${actionLabel}！`;
+  if (ineffective) return `${head}${safeTargetName}には効果がなかった！`;
+  if (missed) return `${head}${safeTargetName}はかわした！`;
+  return `${head}${safeTargetName}に${damage}のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`;
+}
+
 function getSkillByName(monster, name) {
   return (monster.skills || []).find((s) => s && s.name === name) || null;
 }
@@ -357,7 +377,7 @@ function applySkillEffect({ attacker, target, skill }) {
 
 function getEffectApplyMessage(targetName, effectType, applied) {
   if (!targetName) return null;
-  if (!applied) return `${targetName} には効かなかった！`;
+  if (!applied) return `${targetName} には効果がなかった！`;
   const formatter = EFFECT_APPLY_MESSAGES[effectType];
   if (typeof formatter === 'function') return formatter(targetName);
   // eslint-disable-next-line no-console
@@ -379,8 +399,10 @@ function pushEffectAction({
   targetId,
   targetName,
   effectResult,
+  suppressFailed = false,
 }) {
   if (!effectResult || !effectResult.attempted) return;
+  if (suppressFailed && !effectResult.applied) return;
   actions.push({
     actorType,
     actorId,
@@ -718,13 +740,17 @@ function processTurn(battleState, playerAction, options = {}) {
                 isCrit, isSupercrit, missed,
                 removedEffects: [],
                 statusEffectApplied: false,
-                message: actualSkill.is_special
-                  ? null
-                  : (ineffective
-                    ? `${getCombatantLogName(targetMonster, monsterNameMap)}には効果がなかった！`
-                    : (missed
-                    ? `${getCombatantLogName(targetMonster, monsterNameMap)} はかわした！`
-                    : `${player.name} は ${actualSkill.name} を使った！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`)),
+                message: buildAttackActionMessage({
+                  actorName: player.name,
+                  targetName: getCombatantLogName(targetMonster, monsterNameMap),
+                  skillName: actualSkill.name,
+                  damage,
+                  missed,
+                  ineffective,
+                  isCrit,
+                  isSupercrit,
+                  isNormalAttack: String(actualSkill.name || '') === '通常攻撃',
+                }),
               });
               pushEffectAction({
                 actions,
@@ -733,6 +759,7 @@ function processTurn(battleState, playerAction, options = {}) {
                 targetId: targetMonster.instance_id || targetMonster.id,
                 targetName: getCombatantLogName(targetMonster, monsterNameMap),
                 effectResult,
+                suppressFailed: (Number(actualSkill.power) || 0) > 0,
               });
 
               if (targetMonster.hp <= 0 && !targetMonster.escaped) {
@@ -873,13 +900,17 @@ function processTurn(battleState, playerAction, options = {}) {
             isCrit, isSupercrit, missed,
             removedEffects: [],
             statusEffectApplied: false,
-            message: skill.is_special
-              ? null
-              : (ineffective
-                ? `${player.name}には効果がなかった！`
-                : (missed
-                ? `${player.name} はかわした！`
-                : `${getCombatantLogName(monster, monsterNameMap)} の ${skill.name}！ ${damage} のダメージ！${isCrit ? (isSupercrit ? '超会心！' : '会心！') : ''}`)),
+            message: buildAttackActionMessage({
+              actorName: getCombatantLogName(monster, monsterNameMap),
+              targetName: player.name,
+              skillName: skill.name,
+              damage,
+              missed,
+              ineffective,
+              isCrit,
+              isSupercrit,
+              isNormalAttack: String(skill.name || '') === '通常攻撃',
+            }),
           });
           pushEffectAction({
             actions,
@@ -888,6 +919,7 @@ function processTurn(battleState, playerAction, options = {}) {
             targetId: player.id,
             targetName: player.name,
             effectResult,
+            suppressFailed: (Number(skill.power) || 0) > 0,
           });
 
           if (player.hp <= 0) {
