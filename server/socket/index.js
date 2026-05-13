@@ -791,6 +791,7 @@ async function finalizeBattleResult({
   battleState,
   result,
 }) {
+  // モンスター逃走はプレイヤー視点ではダンジョン踏破失敗扱いに統一する
   const normalizedResult = result === 'enemy_escape' ? 'lose' : result;
   const pendingRewards = battleState?.rewardProgress
     ? {
