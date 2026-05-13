@@ -685,7 +685,7 @@
       };
       state.save.character.equipment = await saveEquipmentOnServer(nextEquipment);
       persistSave();
-      renderCharacterView();
+      await loadCharacterProfile();
       closeMiniPopup();
     } catch (e) {
       showModal((e && e.message) || '装備の保存に失敗しました');

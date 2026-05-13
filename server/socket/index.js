@@ -32,6 +32,7 @@ const {
   syncJobProgress,
   JOB_LEVEL_GROWTH_TABLE,
 } = require('../services/skillProgression');
+const { applyEquipmentBonusToCharacter } = require('../services/equipmentStats');
 
 // userId → battleState のインメモリストア（ソケット再接続後もバトル状態を保持するために userId をキーとして使用）
 const activeBattles = new Map();
@@ -147,7 +148,7 @@ async function loadCharacter(userId) {
     char.job_exp = progress.expAfter || 0;
   }
   char.skills = skills;
-  return char;
+  return applyEquipmentBonusToCharacter(char);
 }
 
 async function fetchJobSkills(jobId) {
