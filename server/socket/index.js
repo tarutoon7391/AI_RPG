@@ -777,9 +777,13 @@ function getBattleEndMessage(result) {
   return '戦闘終了';
 }
 
-function buildBattleVictoryMessage(monsters, rewards) {
+function buildBattleVictoryMessage(monsters, rewards, options = {}) {
+  const enemyEscapedOnly = options.enemyEscapedOnly === true;
   const defeatedMonsters = (monsters || [])
     .filter((m) => m && m.hp <= 0 && !m.escaped);
+  if (enemyEscapedOnly && defeatedMonsters.length === 0) {
+    return `敵は逃げ出した！ 経験値 ${rewards.exp} 獲得！ ${rewards.money}G 獲得！`;
+  }
   const names = formatMonsterNames(defeatedMonsters);
   const enemyLabel = names.length ? names.join('、') : '敵';
   return `${enemyLabel} を倒した！ 経験値 ${rewards.exp} 獲得！ ${rewards.money}G 獲得！`;
@@ -791,8 +795,8 @@ async function finalizeBattleResult({
   battleState,
   result,
 }) {
-  // モンスター逃走はプレイヤー視点ではダンジョン踏破失敗扱いに統一する
-  const normalizedResult = result === 'enemy_escape' ? 'lose' : result;
+  // モンスター逃走は勝利進行扱い（報酬は撃破分のみ）
+  const normalizedResult = result === 'enemy_escape' ? 'win' : result;
   const pendingRewards = battleState?.rewardProgress
     ? {
       exp: toInt(battleState.rewardProgress.pendingExp, 0),
@@ -805,8 +809,7 @@ async function finalizeBattleResult({
       money: toInt(battleState.rewardProgress.totalMoney, 0),
     }
     : { exp: 0, money: 0 };
-  const allMonstersDefeated = areAllMonstersDefeated(battleState?.monsters || []);
-  const rewards = (normalizedResult === 'win' && allMonstersDefeated) || normalizedResult === 'escape'
+  const rewards = (normalizedResult === 'win') || normalizedResult === 'escape'
     ? {
       exp: Math.max(0, distributedRewards.exp + pendingRewards.exp),
       money: Math.max(0, distributedRewards.money + pendingRewards.money),
@@ -910,7 +913,9 @@ async function finalizeBattleResult({
       turn: nextBattleState.turn,
       state: getBattleState(nextBattleState),
       playerSkills: nextBattleState.player.skills || [],
-      previousVictoryLog: buildBattleVictoryMessage(battleState.monsters, rewards),
+      previousVictoryLog: buildBattleVictoryMessage(battleState.monsters, rewards, {
+        enemyEscapedOnly: result === 'enemy_escape',
+      }),
       message: `第${nextEncounterIndex + 1}戦/${BEGINNER_MEADOW_ENCOUNTER_TOTAL}：${formatMonsterNames(monsters).join('、')} が現れた！`,
       awaitingPlayerAction: true,
     });
@@ -946,7 +951,11 @@ async function finalizeBattleResult({
       : getBattleEndMessage(normalizedResult),
     playerSkills: battleState.player.skills || [],
     levelUp: null,
-    victoryMessage: normalizedResult === 'win' ? buildBattleVictoryMessage(battleState.monsters, rewards) : null,
+    victoryMessage: normalizedResult === 'win'
+      ? buildBattleVictoryMessage(battleState.monsters, rewards, {
+        enemyEscapedOnly: result === 'enemy_escape',
+      })
+      : null,
   };
 
   if (normalizedResult === 'escape') {

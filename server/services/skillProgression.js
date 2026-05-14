@@ -331,15 +331,13 @@ async function applyJobChangeStats(executor, { characterId, jobId }) {
   const pb = (key) => toInt(permanentBonus[key], 0);
 
   // 転職先のLv1基礎ステータス + 永続ボーナス
-  const newMaxHp = baseStats.hp + pb('hp');
-  const newMaxMp = baseStats.mp + pb('mp');
+  const recalculatedMaxHp = Math.max(1, baseStats.hp + pb('hp'));
+  const recalculatedMaxMp = Math.max(0, baseStats.mp + pb('mp'));
 
   await executor.query(
     `UPDATE characters
      SET max_hp   = $2,
-         hp       = $2,
          max_mp   = $3,
-         mp       = $3,
          attack   = $4,
          defense  = $5,
          recovery = $6,
@@ -349,8 +347,8 @@ async function applyJobChangeStats(executor, { characterId, jobId }) {
      WHERE id = $1`,
     [
       characterId,
-      newMaxHp,
-      newMaxMp,
+      recalculatedMaxHp,
+      recalculatedMaxMp,
       baseStats.attack   + pb('attack'),
       baseStats.defense  + pb('defense'),
       baseStats.recovery + pb('recovery'),
@@ -359,10 +357,20 @@ async function applyJobChangeStats(executor, { characterId, jobId }) {
     ]
   );
 
+  // 最大値更新後にHP/MPを最大まで回復する（順序保証）
+  await executor.query(
+    `UPDATE characters
+     SET hp = max_hp,
+         mp = max_mp,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [characterId]
+  );
+
   return {
     jobName,
-    newMaxHp,
-    newMaxMp,
+    newMaxHp: recalculatedMaxHp,
+    newMaxMp: recalculatedMaxMp,
     permanentBonus,
   };
 }
