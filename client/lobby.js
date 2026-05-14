@@ -1467,7 +1467,8 @@
     try {
       state.pendingBattleEnd = false;
       const nextState = data.state || null;
-      const visualState = cloneBattleState(state.battleState) || cloneBattleState(nextState);
+      const currentVisualState = cloneBattleState(state.battleState);
+      const visualState = currentVisualState || cloneBattleState(nextState);
       state.battleState = visualState;
       updateBattleState();
       state.waitingAction = false;
@@ -1820,8 +1821,28 @@
     });
   }
 
+  function normalizeSkillTarget(target) {
+    if (typeof target !== 'string') return '';
+    return target.trim().toLowerCase();
+  }
+
+  function shouldOpenEnemyTargetSelection(actionType, skillId) {
+    if (actionType === 'attack') return true;
+    if (actionType !== 'skill') return false;
+    const skill = (state.playerSkills || []).find((s) => String(s?.id) === String(skillId));
+    const target = normalizeSkillTarget(skill?.target);
+    if (target === 'self' || target === 'ally' || target === 'all_ally') return false;
+    if (target === 'enemy' || target === 'all_enemy' || target === 'single' || target === 'all') return true;
+    // 既存データ互換のため未知の target は敵選択ありとする
+    return true;
+  }
+
   function requestBattleAction(actionType, skillId, anchorEl) {
     if (!state.socket || !state.waitingAction || !state.battleState) return;
+    if (!shouldOpenEnemyTargetSelection(actionType, skillId)) {
+      emitBattleAction(actionType, skillId, null);
+      return;
+    }
     const aliveEnemies = getAliveEnemies();
     if (!aliveEnemies.length) {
       addBattleLog('対象となるモンスターがいません');

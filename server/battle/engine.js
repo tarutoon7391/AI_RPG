@@ -657,7 +657,10 @@ function processTurn(battleState, playerAction, options = {}) {
                 || actualSkill.skill_type === 'status')
               && (Number(actualSkill.power) || 0) <= 0
             ) {
-              const target = actualSkill.target === 'self' ? player : targetMonster;
+              const targetScope = String(actualSkill.target || '').toLowerCase();
+              const target = (targetScope === 'self' || targetScope === 'ally' || targetScope === 'all_ally')
+                ? player
+                : targetMonster;
               const targetId = target
                 ? (target === player ? player.id : (target.instance_id || target.id))
                 : null;
