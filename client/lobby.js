@@ -1833,7 +1833,7 @@
     const target = normalizeSkillTarget(skill?.target);
     if (target === 'self' || target === 'ally' || target === 'all_ally') return false;
     if (target === 'enemy' || target === 'all_enemy' || target === 'single' || target === 'all') return true;
-    // 既存データ互換のため未知の target は敵選択ありとする
+    // 既存データ互換のため未知の target は敵選択ありにする
     return true;
   }
 
